@@ -2,7 +2,6 @@ import { api } from '@rocket.chat/core-services';
 import type { AtLeast, IMessage, IUser } from '@rocket.chat/core-typings';
 import type { ServerMethods } from '@rocket.chat/ddp-client';
 import { Messages, Users } from '@rocket.chat/models';
-import type { TOptions } from 'i18next';
 import { check } from 'meteor/check';
 import { Meteor } from 'meteor/meteor';
 import moment from 'moment';
@@ -17,7 +16,12 @@ import { MessageTypes } from '../../../ui-utils/server';
 import { sendMessage } from '../functions/sendMessage';
 import { RateLimiter } from '../lib';
 
-export async function executeSendMessage(uid: IUser['_id'], message: AtLeast<IMessage, 'rid'>, previewUrls?: string[]) {
+export async function executeSendMessage(
+	uid: IUser['_id'],
+	message: AtLeast<IMessage, 'rid'>,
+	previewUrls?: string[],
+	uploadIdsToConfirm?: string[],
+) {
 	if (message.tshow && !message.tmid) {
 		throw new Meteor.Error('invalid-params', 'tshow provided but missing tmid', {
 			method: 'sendMessage',
@@ -94,14 +98,14 @@ export async function executeSendMessage(uid: IUser['_id'], message: AtLeast<IMe
 		}
 
 		metrics.messagesSent.inc(); // TODO This line needs to be moved to it's proper place. See the comments on: https://github.com/RocketChat/Rocket.Chat/pull/5736
-		return await sendMessage(user, message, room, false, previewUrls);
+		return await sendMessage(user, message, room, false, previewUrls, uploadIdsToConfirm);
 	} catch (err: any) {
 		SystemLogger.error({ msg: 'Error sending message:', err });
 
 		const errorMessage = typeof err === 'string' ? err : err.error || err.message;
-		const errorContext: TOptions = err.details ?? {};
+		const errorContext = err.details ?? {};
 		void api.broadcast('notify.ephemeralMessage', uid, message.rid, {
-			msg: i18n.t(errorMessage, { ...errorContext, lng: user.language }),
+			msg: i18n.t(errorMessage, errorContext, user.language),
 		});
 
 		if (typeof err === 'string') {
@@ -115,12 +119,12 @@ export async function executeSendMessage(uid: IUser['_id'], message: AtLeast<IMe
 declare module '@rocket.chat/ddp-client' {
 	// eslint-disable-next-line @typescript-eslint/naming-convention
 	interface ServerMethods {
-		sendMessage(message: AtLeast<IMessage, '_id' | 'rid' | 'msg'>, previewUrls?: string[]): any;
+		sendMessage(message: AtLeast<IMessage, '_id' | 'rid' | 'msg'>, previewUrls?: string[], uploadIdsToConfirm?: string[]): any;
 	}
 }
 
 Meteor.methods<ServerMethods>({
-	async sendMessage(message, previewUrls) {
+	async sendMessage(message, previewUrls, uploadIdsToConfirm) {
 		check(message, Object);
 
 		const uid = Meteor.userId();
@@ -135,7 +139,7 @@ Meteor.methods<ServerMethods>({
 		}
 
 		try {
-			return await executeSendMessage(uid, message, previewUrls);
+			return await executeSendMessage(uid, message, previewUrls, uploadIdsToConfirm);
 		} catch (error: any) {
 			if ((error.error || error.message) === 'error-not-allowed') {
 				throw new Meteor.Error(error.error || error.message, error.reason, {
