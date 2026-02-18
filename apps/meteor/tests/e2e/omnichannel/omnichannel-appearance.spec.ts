@@ -1,20 +1,19 @@
 import { IS_EE } from '../config/constants';
 import { Users } from '../fixtures/userStates';
-import { OmnichannelLivechatAppearance } from '../page-objects/omnichannel-livechat-appearance';
+import { OmnichannelLivechatAppearance } from '../page-objects/omnichannel';
 import { test, expect } from '../utils/test';
 
 test.use({ storageState: Users.admin.state });
 
-test.skip(!IS_EE, 'Enterprise Only');
-
-test.describe.serial('OC - Livechat Appearance', () => {
+test.describe.serial('OC - Livechat Appearance - EE', () => {
 	let poLivechatAppearance: OmnichannelLivechatAppearance;
+	test.skip(!IS_EE, 'Enterprise Only');
 
 	test.beforeEach(async ({ page }) => {
 		poLivechatAppearance = new OmnichannelLivechatAppearance(page);
 
 		await page.goto('/omnichannel');
-		await poLivechatAppearance.sidenav.linkLivechatAppearance.click();
+		await poLivechatAppearance.sidebar.linkLivechatAppearance.click();
 	});
 
 	test.afterAll(async ({ api }) => {
@@ -43,7 +42,7 @@ test.describe.serial('OC - Livechat Appearance', () => {
 			await poLivechatAppearance.inputHideSystemMessages.locator('.rcx-icon--name-chevron-down').click();
 			await poLivechatAppearance.findHideSystemMessageOption('livechat_transfer_history').click();
 			await poLivechatAppearance.findHideSystemMessageOption('livechat-close').click();
-			await poLivechatAppearance.btnSave.click();
+			await poLivechatAppearance.btnSaveChanges.click();
 		});
 
 		await test.step('expect to have saved changes', async () => {
@@ -64,12 +63,47 @@ test.describe.serial('OC - Livechat Appearance', () => {
 
 		await test.step('expect to change value', async () => {
 			await poLivechatAppearance.inputLivechatBackground.fill('rgb(186, 1, 85)');
-			await poLivechatAppearance.btnSave.click();
+			await poLivechatAppearance.btnSaveChanges.click();
 		});
 
 		await test.step('expect to have saved changes', async () => {
 			await page.reload();
 			await expect(poLivechatAppearance.inputLivechatBackground).toHaveValue('rgb(186, 1, 85)');
+		});
+	});
+});
+
+test.describe('OC - Livechat Appearance - CE', () => {
+	let poLivechatAppearance: OmnichannelLivechatAppearance;
+
+	test.beforeEach(async ({ page }) => {
+		poLivechatAppearance = new OmnichannelLivechatAppearance(page);
+
+		await page.goto('/omnichannel');
+		await poLivechatAppearance.sidebar.linkLivechatAppearance.click();
+	});
+
+	test.afterAll(async ({ api }) => {
+		const res = await api.post('/settings/Livechat_title', { value: 'Rocket.Chat' });
+
+		if (res.status() !== 200) {
+			throw new Error('Failed to reset settings');
+		}
+	});
+
+	test('OC - Livechat Appearance - Change Livechat Title', async ({ page }) => {
+		await test.step('expect to have default value', async () => {
+			await expect(poLivechatAppearance.inputLivechatTitle).toHaveValue('Rocket.Chat');
+		});
+
+		await test.step('expect to change value', async () => {
+			await poLivechatAppearance.inputLivechatTitle.fill('Test Title');
+			await poLivechatAppearance.btnSaveChanges.click();
+		});
+
+		await test.step('expect to have saved changes', async () => {
+			await page.reload();
+			await expect(poLivechatAppearance.inputLivechatTitle).toHaveValue('Test Title');
 		});
 	});
 });

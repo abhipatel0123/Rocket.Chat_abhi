@@ -1,14 +1,14 @@
 import { AppEvents, Apps } from '@rocket.chat/apps';
 import { api, Message } from '@rocket.chat/core-services';
-import type { AtLeast, IMessage, IUser } from '@rocket.chat/core-typings';
-import { Messages, Rooms, Uploads, Users, ReadReceipts } from '@rocket.chat/models';
+import { isThreadMessage, type AtLeast, type IMessage, type IRoom, type IThreadMessage, type IUser } from '@rocket.chat/core-typings';
+import { Messages, Rooms, Uploads, Users, ReadReceipts, Subscriptions } from '@rocket.chat/models';
 import { Meteor } from 'meteor/meteor';
 
-import { callbacks } from '../../../../lib/callbacks';
+import { callbacks } from '../../../../server/lib/callbacks';
 import { canDeleteMessageAsync } from '../../../authorization/server/functions/canDeleteMessage';
 import { FileUpload } from '../../../file-upload/server';
 import { settings } from '../../../settings/server';
-import { notifyOnRoomChangedById, notifyOnMessageChange } from '../lib/notifyListener';
+import { notifyOnRoomChangedById, notifyOnMessageChange, notifyOnSubscriptionChangedByRoomIdAndUserIds } from '../lib/notifyListener';
 
 export const deleteMessageValidatingPermission = async (message: AtLeast<IMessage, '_id'>, userId: IUser['_id']): Promise<void> => {
 	if (!message?._id) {
@@ -21,7 +21,7 @@ export const deleteMessageValidatingPermission = async (message: AtLeast<IMessag
 	const user = await Users.findOneById(userId);
 	const originalMessage = await Messages.findOneById(message._id);
 
-	if (!originalMessage || !user || !(await canDeleteMessageAsync(userId, originalMessage))) {
+	if (!originalMessage || !user || !(await canDeleteMessageAsync(user, originalMessage))) {
 		throw new Meteor.Error('error-action-not-allowed', 'Not allowed');
 	}
 
@@ -33,16 +33,13 @@ export async function deleteMessage(message: IMessage, user: IUser): Promise<voi
 	const isThread = (deletedMsg?.tcount || 0) > 0;
 	const keepHistory = settings.get('Message_KeepHistory') || isThread;
 	const showDeletedStatus = settings.get('Message_ShowDeletedStatus') || isThread;
-	const bridges = Apps.self?.isLoaded() && Apps.getBridges();
 
-	const room = await Rooms.findOneById(message.rid, { projection: { lastMessage: 1, prid: 1, mid: 1, federated: 1 } });
+	const room = await Rooms.findOneById(message.rid, { projection: { lastMessage: 1, prid: 1, mid: 1, federated: 1, federation: 1 } });
 
 	if (deletedMsg) {
-		if (bridges) {
-			const prevent = await bridges.getListenerBridge().messageEvent(AppEvents.IPreMessageDeletePrevent, deletedMsg);
-			if (prevent) {
-				throw new Meteor.Error('error-app-prevented-deleting', 'A Rocket.Chat App prevented the message deleting.');
-			}
+		const prevent = await Apps.self?.triggerEvent(AppEvents.IPreMessageDeletePrevent, deletedMsg);
+		if (prevent) {
+			throw new Meteor.Error('error-app-prevented-deleting', 'A Rocket.Chat App prevented the message deleting.');
 		}
 
 		if (room) {
@@ -50,8 +47,8 @@ export async function deleteMessage(message: IMessage, user: IUser): Promise<voi
 		}
 	}
 
-	if (deletedMsg?.tmid) {
-		await Messages.decreaseReplyCountById(deletedMsg.tmid, -1);
+	if (deletedMsg && isThreadMessage(deletedMsg)) {
+		await deleteThreadMessage(deletedMsg, user, room);
 	}
 
 	const files = (message.files || [message.file]).filter(Boolean); // Keep compatibility with old messages
@@ -93,7 +90,7 @@ export async function deleteMessage(message: IMessage, user: IUser): Promise<voi
 		await Rooms.decreaseMessageCountById(message.rid, 1);
 	}
 
-	await callbacks.run('afterDeleteMessage', deletedMsg, room);
+	await callbacks.run('afterDeleteMessage', deletedMsg, { room, user });
 
 	void notifyOnRoomChangedById(message.rid);
 
@@ -103,7 +100,29 @@ export async function deleteMessage(message: IMessage, user: IUser): Promise<voi
 		});
 	}
 
-	if (bridges && deletedMsg) {
-		void bridges.getListenerBridge().messageEvent(AppEvents.IPostMessageDeleted, deletedMsg, user);
+	if (deletedMsg) {
+		void Apps.self?.triggerEvent(AppEvents.IPostMessageDeleted, deletedMsg, user);
+	}
+}
+
+async function deleteThreadMessage(message: IThreadMessage, user: IUser, room: IRoom | null): Promise<void> {
+	const updatedParentMessage = await Messages.decreaseReplyCountById(message.tmid, -1);
+
+	if (room) {
+		const { modifiedCount } = await Subscriptions.removeUnreadThreadsByRoomId(room._id, [message.tmid]);
+		if (modifiedCount > 0) {
+			// The replies array contains the ids of all the users that are following the thread (everyone that is involved + the ones who are following)
+			// Technically, user._id is already in the message.replies array, but since we don't have any strong
+			// guarantees of it, we are adding again to make sure it is there.
+			const userIdsThatAreWatchingTheThread = [...new Set([user._id, ...(message.replies || [])])];
+			// So they can decrement the unread threads count
+			void notifyOnSubscriptionChangedByRoomIdAndUserIds(room._id, userIdsThatAreWatchingTheThread);
+		}
+	}
+
+	if (updatedParentMessage && updatedParentMessage.tcount === 0) {
+		void notifyOnMessageChange({
+			id: message.tmid,
+		});
 	}
 }

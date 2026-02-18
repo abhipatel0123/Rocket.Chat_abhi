@@ -1,11 +1,29 @@
-import Ajv from 'ajv';
-
 import type { PaginatedRequest } from '../../helpers/PaginatedRequest';
+import { ajv } from '../Ajv';
 
-const ajv = new Ajv({
-	coerceTypes: true,
-});
+export type ChannelsListProps = PaginatedRequest<{ _id?: string }>;
 
-export type ChannelsListProps = PaginatedRequest<null>;
-const channelsListPropsSchema = {};
+const channelsListPropsSchema = {
+	type: 'object',
+	properties: {
+		_id: {
+			type: 'string',
+		},
+		query: {
+			type: 'string',
+		},
+		count: {
+			type: 'number',
+		},
+		offset: {
+			type: 'number',
+		},
+		sort: {
+			type: 'string',
+		},
+	},
+	required: [],
+	additionalProperties: false,
+};
+
 export const isChannelsListProps = ajv.compile<ChannelsListProps>(channelsListPropsSchema);

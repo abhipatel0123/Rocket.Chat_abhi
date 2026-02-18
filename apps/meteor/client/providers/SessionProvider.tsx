@@ -1,7 +1,6 @@
 import { SessionContext } from '@rocket.chat/ui-contexts';
 import { Session } from 'meteor/session';
 import type { ReactNode } from 'react';
-import React from 'react';
 
 import { createReactiveSubscriptionFactory } from '../lib/createReactiveSubscriptionFactory';
 
@@ -16,6 +15,8 @@ type SessionProviderProps = {
 	children?: ReactNode;
 };
 
-const SessionProvider = ({ children }: SessionProviderProps) => <SessionContext.Provider children={children} value={contextValue} />;
+const SessionProvider = ({ children }: SessionProviderProps) => (
+	<SessionContext.Provider value={contextValue}>{children}</SessionContext.Provider>
+);
 
 export default SessionProvider;

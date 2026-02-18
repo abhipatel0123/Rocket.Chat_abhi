@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/rules-of-hooks */
 import { RestClient } from '@rocket.chat/api-client';
 import { Accounts } from 'meteor/accounts-base';
 
@@ -5,7 +6,7 @@ import { invokeTwoFactorModal } from '../../../../client/lib/2fa/process2faRetur
 import { baseURI } from '../../../../client/lib/baseURI';
 
 class RestApiClient extends RestClient {
-	getCredentials():
+	override getCredentials():
 		| {
 				'X-User-Id': string;
 				'X-Auth-Token': string;

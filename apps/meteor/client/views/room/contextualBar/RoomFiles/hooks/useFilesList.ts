@@ -1,38 +1,14 @@
 import { Base64 } from '@rocket.chat/base64';
-import { useUserRoom, useUserId, useEndpoint } from '@rocket.chat/ui-contexts';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { IUpload } from '@rocket.chat/core-typings';
+import { useUserRoom, useEndpoint } from '@rocket.chat/ui-contexts';
+import { useInfiniteQuery } from '@tanstack/react-query';
 
-import { e2e } from '../../../../../../app/e2e/client/rocketchat.e2e';
-import { useScrollableRecordList } from '../../../../../hooks/lists/useScrollableRecordList';
-import { useStreamUpdatesForMessageList } from '../../../../../hooks/lists/useStreamUpdatesForMessageList';
-import { useComponentDidUpdate } from '../../../../../hooks/useComponentDidUpdate';
-import type { FilesListOptions } from '../../../../../lib/lists/FilesList';
-import { FilesList } from '../../../../../lib/lists/FilesList';
-import type { MessageList } from '../../../../../lib/lists/MessageList';
+import { e2e } from '../../../../../lib/e2ee/rocketchat.e2e';
+import { roomsQueryKeys } from '../../../../../lib/queryKeys';
 import { getConfig } from '../../../../../lib/utils/getConfig';
 
-export const useFilesList = (
-	options: FilesListOptions,
-): {
-	filesList: FilesList;
-	initialItemCount: number;
-	reload: () => void;
-	loadMoreItems: (start: number, end: number) => void;
-} => {
-	const [filesList, setFilesList] = useState(() => new FilesList(options));
-	const reload = useCallback(() => setFilesList(new FilesList(options)), [options]);
-	const room = useUserRoom(options.rid);
-	const uid = useUserId();
-
-	useComponentDidUpdate(() => {
-		options && reload();
-	}, [options, reload]);
-
-	useEffect(() => {
-		if (filesList.options !== options) {
-			filesList.updateFilters(options);
-		}
-	}, [filesList, options]);
+export const useFilesList = ({ rid, type, text }: { rid: Required<IUpload>['rid']; type: string; text: string }) => {
+	const room = useUserRoom(rid);
 
 	const roomTypes = {
 		c: '/v1/channels.files',
@@ -42,29 +18,30 @@ export const useFilesList = (
 		p: '/v1/groups.files',
 	} as const;
 
-	const apiEndPoint = room ? roomTypes[room.t] : '/v1/channels.files';
+	const getFiles = useEndpoint('GET', roomTypes[room?.t ?? 'c']);
 
-	const getFiles = useEndpoint('GET', apiEndPoint);
+	const count = parseInt(`${getConfig('discussionListSize', 10)}`, 10);
 
-	const fetchMessages = useCallback(
-		async (start, end) => {
+	return useInfiniteQuery({
+		queryKey: roomsQueryKeys.files(rid, { type, text }),
+		queryFn: async ({ pageParam: offset }) => {
 			const { files, total } = await getFiles({
-				roomId: options.rid,
-				offset: start,
-				count: end,
+				roomId: rid,
+				offset,
+				count,
 				sort: JSON.stringify({ uploadedAt: -1 }),
-				query: JSON.stringify({
-					name: { $regex: options.text || '', $options: 'i' },
-					...(options.type !== 'all' && {
-						typeGroup: options.type,
-					}),
+				...(text ? { name: text } : {}),
+				...(type !== 'all' && {
+					typeGroup: type,
 				}),
+				onlyConfirmed: true,
 			});
 
 			const items = files.map((file) => ({
 				...file,
 				uploadedAt: file.uploadedAt ? new Date(file.uploadedAt) : undefined,
 				modifiedAt: file.modifiedAt ? new Date(file.modifiedAt) : undefined,
+				expiresAt: file.expiresAt ? new Date(file.expiresAt) : undefined,
 			}));
 
 			for await (const file of items) {
@@ -90,22 +67,15 @@ export const useFilesList = (
 				itemCount: total,
 			};
 		},
-		[getFiles, options.rid, options.type, options.text],
-	);
-
-	const { loadMoreItems, initialItemCount } = useScrollableRecordList(
-		filesList,
-		fetchMessages,
-		useMemo(() => parseInt(`${getConfig('discussionListSize', 10)}`), []),
-	);
-
-	// TODO: chapter day : frontend create useStreamUpdatesForUploadList
-	useStreamUpdatesForMessageList(filesList as unknown as MessageList, uid, options.rid || null);
-
-	return {
-		reload,
-		filesList,
-		loadMoreItems,
-		initialItemCount,
-	};
+		initialPageParam: 0,
+		getNextPageParam: (lastPage, _, lastOffset) => {
+			const nextOffset = lastOffset + count;
+			if (nextOffset >= lastPage.itemCount) return undefined;
+			return nextOffset;
+		},
+		select: ({ pages }) => ({
+			filesItems: pages.flatMap((page) => page.items),
+			total: pages.at(-1)?.itemCount,
+		}),
+	});
 };

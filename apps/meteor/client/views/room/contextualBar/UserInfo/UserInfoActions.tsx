@@ -2,9 +2,9 @@
 import type { IRoom, IUser } from '@rocket.chat/core-typings';
 import { ButtonGroup, IconButton, Skeleton } from '@rocket.chat/fuselage';
 import { GenericMenu } from '@rocket.chat/ui-client';
-import { useTranslation } from '@rocket.chat/ui-contexts';
 import type { ReactElement } from 'react';
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { UserInfoAction } from '../../../../components/UserInfo';
 import { useMemberExists } from '../../../hooks/useMemberExists';
@@ -13,16 +13,17 @@ import { useUserInfoActions } from '../../hooks/useUserInfoActions';
 type UserInfoActionsProps = {
 	user: Pick<IUser, '_id' | 'username' | 'name' | 'freeSwitchExtension'>;
 	rid: IRoom['_id'];
-	backToList: () => void;
+	isInvited?: boolean;
+	backToList?: () => void;
 };
 
-const UserInfoActions = ({ user, rid, backToList }: UserInfoActionsProps): ReactElement => {
-	const t = useTranslation();
+const UserInfoActions = ({ user, rid, isInvited, backToList }: UserInfoActionsProps): ReactElement => {
+	const { t } = useTranslation();
 	const {
 		data: isMemberData,
 		refetch,
 		isSuccess: membershipCheckSuccess,
-		isLoading,
+		isPending,
 	} = useMemberExists({ roomId: rid, username: user.username as string });
 
 	const isMember = membershipCheckSuccess && isMemberData?.isMember;
@@ -31,8 +32,9 @@ const UserInfoActions = ({ user, rid, backToList }: UserInfoActionsProps): React
 	const { actions: actionsDefinition, menuActions: menuOptions } = useUserInfoActions({
 		rid,
 		user: { _id: userId, username, name, freeSwitchExtension },
-		size: 3,
+		size: 2,
 		isMember,
+		isInvited,
 		reload: () => {
 			backToList?.();
 			refetch();
@@ -49,11 +51,9 @@ const UserInfoActions = ({ user, rid, backToList }: UserInfoActionsProps): React
 				button={<IconButton icon='kebab' secondary />}
 				title={t('More')}
 				key='menu'
-				data-qa-id='UserUserInfo-menu'
 				sections={menuOptions}
 				placement='bottom-end'
 				small={false}
-				data-qa='UserUserInfo-menu'
 			/>
 		);
 	}, [menuOptions, t]);
@@ -67,7 +67,7 @@ const UserInfoActions = ({ user, rid, backToList }: UserInfoActionsProps): React
 		return [...actionsDefinition.map(mapAction), menu].filter(Boolean);
 	}, [actionsDefinition, menu]);
 
-	if (isLoading) {
+	if (isPending) {
 		return <Skeleton w='full' />;
 	}
 	return <ButtonGroup align='center'>{actions}</ButtonGroup>;

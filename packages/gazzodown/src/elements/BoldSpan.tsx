@@ -1,14 +1,14 @@
 import type * as MessageParser from '@rocket.chat/message-parser';
 import type { ReactElement } from 'react';
 
-import CodeElement from '../code/CodeElement';
-import EmojiElement from '../emoji/EmojiElement';
-import ChannelMentionElement from '../mentions/ChannelMentionElement';
-import UserMentionElement from '../mentions/UserMentionElement';
 import ItalicSpan from './ItalicSpan';
 import LinkSpan from './LinkSpan';
 import PlainSpan from './PlainSpan';
 import StrikeSpan from './StrikeSpan';
+import CodeElement from '../code/CodeElement';
+import EmojiElement from '../emoji/EmojiElement';
+import ChannelMentionElement from '../mentions/ChannelMentionElement';
+import UserMentionElement from '../mentions/UserMentionElement';
 
 type MessageBlock =
 	| MessageParser.Emoji
@@ -57,10 +57,10 @@ const renderBlockComponent = (block: MessageBlock, index: number): ReactElement 
 			return <LinkSpan key={index} href={block.value.src.value} label={block.value.label} />;
 
 		case 'STRIKE':
-			return <StrikeSpan key={index} children={block.value} />;
+			return <StrikeSpan key={index}>{block.value}</StrikeSpan>;
 
 		case 'ITALIC':
-			return <ItalicSpan key={index} children={block.value} />;
+			return <ItalicSpan key={index}>{block.value}</ItalicSpan>;
 
 		case 'INLINE_CODE':
 			return <CodeElement key={index} code={block.value.value} />;

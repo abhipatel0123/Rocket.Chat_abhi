@@ -3,10 +3,10 @@ import { ILivechatAgentStatus, LivechatBusinessHourTypes } from '@rocket.chat/co
 import { LivechatBusinessHours, Users } from '@rocket.chat/models';
 import moment from 'moment';
 
-import { notifyOnUserChangeAsync } from '../../../lib/server/lib/notifyListener';
-import { businessHourLogger } from '../lib/logger';
 import { createDefaultBusinessHourRow } from './LivechatBusinessHours';
 import { filterBusinessHoursThatMustBeOpened } from './filterBusinessHoursThatMustBeOpened';
+import { notifyOnUserChangeAsync } from '../../../lib/server/lib/notifyListener';
+import { businessHourLogger } from '../lib/logger';
 
 export { filterBusinessHoursThatMustBeOpened };
 
@@ -22,34 +22,38 @@ export const filterBusinessHoursThatMustBeOpenedByDay = async (
 };
 
 export const openBusinessHourDefault = async (): Promise<void> => {
-	await Users.removeBusinessHoursFromAllUsers();
-	const currentTime = moment(moment().format('dddd:HH:mm'), 'dddd:HH:mm');
-	const day = currentTime.format('dddd');
-	const activeBusinessHours = await LivechatBusinessHours.findDefaultActiveAndOpenBusinessHoursByDay(day, {
-		projection: {
-			workHours: 1,
-			timezone: 1,
-			type: 1,
-			active: 1,
-		},
-	});
+	try {
+		await Users.removeBusinessHoursFromAllUsers();
+		const currentTime = moment(moment().format('dddd:HH:mm'), 'dddd:HH:mm');
+		const day = currentTime.format('dddd');
+		const activeBusinessHours = await LivechatBusinessHours.findDefaultActiveAndOpenBusinessHoursByDay(day, {
+			projection: {
+				workHours: 1,
+				timezone: 1,
+				type: 1,
+				active: 1,
+			},
+		});
 
-	const businessHoursToOpenIds = (await filterBusinessHoursThatMustBeOpened(activeBusinessHours)).map((businessHour) => businessHour._id);
-	businessHourLogger.debug({ msg: 'Opening default business hours', businessHoursToOpenIds });
-	await Users.openAgentsBusinessHoursByBusinessHourId(businessHoursToOpenIds);
-	if (businessHoursToOpenIds.length) {
-		await makeOnlineAgentsAvailable();
+		const businessHoursToOpenIds = (await filterBusinessHoursThatMustBeOpened(activeBusinessHours)).map((businessHour) => businessHour._id);
+		businessHourLogger.debug({ msg: 'Opening default business hours', businessHoursToOpenIds });
+		await Users.openAgentsBusinessHoursByBusinessHourId(businessHoursToOpenIds);
+		if (businessHoursToOpenIds.length) {
+			await makeOnlineAgentsAvailable();
+		}
+		await makeAgentsUnavailableBasedOnBusinessHour();
+	} catch (err) {
+		businessHourLogger.error({ msg: 'Error while opening default business hours', err });
 	}
-	await makeAgentsUnavailableBasedOnBusinessHour();
 };
 
 export const createDefaultBusinessHourIfNotExists = async (): Promise<void> => {
-	if ((await LivechatBusinessHours.col.countDocuments({ type: LivechatBusinessHourTypes.DEFAULT })) === 0) {
+	if ((await LivechatBusinessHours.countDocuments({ type: LivechatBusinessHourTypes.DEFAULT })) === 0) {
 		await LivechatBusinessHours.insertOne(createDefaultBusinessHourRow());
 	}
 };
 
-export async function makeAgentsUnavailableBasedOnBusinessHour(agentIds: string[] | null = null) {
+export async function makeAgentsUnavailableBasedOnBusinessHour(agentIds?: string[]) {
 	const results = await Users.findAgentsAvailableWithoutBusinessHours(agentIds).toArray();
 
 	const update = await Users.updateLivechatStatusByAgentIds(
@@ -75,7 +79,7 @@ export async function makeAgentsUnavailableBasedOnBusinessHour(agentIds: string[
 	);
 }
 
-export async function makeOnlineAgentsAvailable(agentIds: string[] | null = null) {
+export async function makeOnlineAgentsAvailable(agentIds?: string[]) {
 	const results = await Users.findOnlineButNotAvailableAgents(agentIds).toArray();
 
 	const update = await Users.updateLivechatStatusByAgentIds(

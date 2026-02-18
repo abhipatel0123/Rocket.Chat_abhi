@@ -1,16 +1,16 @@
 import { Select, Box, type SelectOption } from '@rocket.chat/fuselage';
-import { useMutableCallback } from '@rocket.chat/fuselage-hooks';
-import { useTranslation } from '@rocket.chat/ui-contexts';
+import { useEffectEvent } from '@rocket.chat/fuselage-hooks';
 import moment, { type Moment } from 'moment';
-import React, { useMemo, useEffect } from 'react';
+import type { Key } from 'react';
+import { useMemo, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 
 type DateRangePickerProps = {
 	onChange(range: { start: string; end: string }): void;
+	defaultSelectedKey?: 'today' | 'yesterday' | 'thisWeek' | 'previousWeek' | 'thisMonth' | 'alldates';
 };
 
 const formatToDateInput = (date: Moment) => date.locale('en').format('YYYY-MM-DD');
-
-const todayDate = formatToDateInput(moment());
 
 const getMonthRange = (monthsToSubtractFromToday: number) => ({
 	start: formatToDateInput(moment().subtract(monthsToSubtractFromToday, 'month').date(1)),
@@ -22,10 +22,10 @@ const getWeekRange = (daysToSubtractFromStart: number, daysToSubtractFromEnd: nu
 	end: formatToDateInput(moment().subtract(daysToSubtractFromEnd, 'day')),
 });
 
-const DateRangePicker = ({ onChange }: DateRangePickerProps) => {
-	const t = useTranslation();
+const DateRangePicker = ({ onChange, defaultSelectedKey = 'alldates' }: DateRangePickerProps) => {
+	const { t } = useTranslation();
 
-	const handleRange = useMutableCallback((range) => {
+	const handleRange = useEffectEvent((range: { start: string; end: string }) => {
 		onChange(range);
 	});
 
@@ -40,14 +40,7 @@ const DateRangePicker = ({ onChange }: DateRangePickerProps) => {
 		].map(([value, label]) => [value, label] as SelectOption);
 	}, [t]);
 
-	useEffect(() => {
-		handleRange({
-			start: formatToDateInput(moment(0)),
-			end: todayDate,
-		});
-	}, [handleRange]);
-
-	const handleOptionClick = useMutableCallback((action) => {
+	const handleOptionClick = useEffectEvent((action: Key) => {
 		switch (action) {
 			case 'today':
 				handleRange(getWeekRange(0, 0));
@@ -66,8 +59,8 @@ const DateRangePicker = ({ onChange }: DateRangePickerProps) => {
 				break;
 			case 'alldates':
 				handleRange({
-					start: formatToDateInput(moment(0)),
-					end: todayDate,
+					start: '',
+					end: '',
 				});
 				break;
 			default:
@@ -75,9 +68,13 @@ const DateRangePicker = ({ onChange }: DateRangePickerProps) => {
 		}
 	});
 
+	useEffect(() => {
+		handleOptionClick(defaultSelectedKey);
+	}, []);
+
 	return (
 		<Box flexGrow={0}>
-			<Select defaultSelectedKey='alldates' width='100%' options={timeOptions} onChange={handleOptionClick} />
+			<Select defaultSelectedKey={defaultSelectedKey} width='100%' options={timeOptions} onChange={handleOptionClick} />
 		</Box>
 	);
 };

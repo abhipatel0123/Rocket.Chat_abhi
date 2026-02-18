@@ -20,7 +20,7 @@ export class SlackUsersImporter extends Importer {
 		this.csvParser = parse;
 	}
 
-	async prepareUsingLocalFile(fullFilePath: string): Promise<ImporterProgress> {
+	override async prepareUsingLocalFile(fullFilePath: string): Promise<ImporterProgress> {
 		this.logger.debug('start preparing import operation');
 		await this.converter.clearImportData();
 
@@ -95,7 +95,7 @@ export class SlackUsersImporter extends Importer {
 		await super.updateProgress(ProgressStep.USER_SELECTION);
 		await super.addCountToTotal(userCount);
 
-		const { value } = await Settings.incrementValueById('Slack_Users_Importer_Count', userCount, { returnDocument: 'after' });
+		const value = await Settings.incrementValueById('Slack_Users_Importer_Count', userCount, { returnDocument: 'after' });
 		if (value) {
 			void notifyOnSettingChanged(value);
 		}

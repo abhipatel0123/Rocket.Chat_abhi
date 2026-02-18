@@ -3,13 +3,13 @@ import type { IActionManager } from '@rocket.chat/ui-contexts';
 import { useUserId } from '@rocket.chat/ui-contexts';
 import { renderHook } from '@testing-library/react';
 
-import { E2ERoomState } from '../../../../../app/e2e/client/E2ERoomState';
+import { useChatMessagesInstance } from './useChatMessagesInstance';
 import { ChatMessages } from '../../../../../app/ui/client/lib/ChatMessages';
 import { useEmojiPicker } from '../../../../contexts/EmojiPickerContext';
+import type { E2ERoomState } from '../../../../lib/e2ee/E2ERoomState';
 import { useUiKitActionManager } from '../../../../uikit/hooks/useUiKitActionManager';
 import { useRoomSubscription } from '../../contexts/RoomContext';
 import { useE2EERoomState } from '../../hooks/useE2EERoomState';
-import { useChatMessagesInstance } from './useChatMessagesInstance';
 
 jest.mock('@rocket.chat/ui-contexts', () => ({
 	useUserId: jest.fn(),
@@ -35,6 +35,7 @@ jest.mock('../../../../../app/ui/client/lib/ChatMessages', () => {
 				release: jest.fn(),
 				readStateManager: {
 					updateSubscription: updateSubscriptionMock,
+					subscribeToMessages: jest.fn(),
 				},
 			};
 		}),
@@ -66,7 +67,7 @@ describe('useChatMessagesInstance', () => {
 			rid: 'roomId',
 		};
 		mockActionManager = undefined;
-		mockE2EERoomState = E2ERoomState.READY;
+		mockE2EERoomState = 'READY';
 		mockEmojiPicker = {
 			open: jest.fn(),
 			isOpen: false,
@@ -81,14 +82,12 @@ describe('useChatMessagesInstance', () => {
 	});
 
 	it('should initialize ChatMessages instance with correct arguments', () => {
-		const { result } = renderHook(
-			() =>
-				useChatMessagesInstance({
-					rid: mockSubscription.rid,
-					tmid: 'threadId',
-					encrypted: false,
-				}),
-			{ legacyRoot: true },
+		const { result } = renderHook(() =>
+			useChatMessagesInstance({
+				rid: mockSubscription.rid,
+				tmid: 'threadId',
+				encrypted: false,
+			}),
 		);
 
 		expect(ChatMessages).toHaveBeenCalledWith({
@@ -105,14 +104,12 @@ describe('useChatMessagesInstance', () => {
 	});
 
 	it('should update ChatMessages subscription', () => {
-		const { result, rerender } = renderHook(
-			() =>
-				useChatMessagesInstance({
-					rid: mockSubscription.rid,
-					tmid: 'threadId',
-					encrypted: false,
-				}),
-			{ legacyRoot: true },
+		const { result, rerender } = renderHook(() =>
+			useChatMessagesInstance({
+				rid: mockSubscription.rid,
+				tmid: 'threadId',
+				encrypted: false,
+			}),
 		);
 
 		expect(ChatMessages).toHaveBeenCalledWith({
@@ -145,14 +142,12 @@ describe('useChatMessagesInstance', () => {
 	});
 
 	it('should update ChatMessages instance when dependencies changes', () => {
-		const { result, rerender } = renderHook(
-			() =>
-				useChatMessagesInstance({
-					rid: mockSubscription.rid,
-					tmid: 'threadId',
-					encrypted: false,
-				}),
-			{ legacyRoot: true },
+		const { result, rerender } = renderHook(() =>
+			useChatMessagesInstance({
+				rid: mockSubscription.rid,
+				tmid: 'threadId',
+				encrypted: false,
+			}),
 		);
 
 		expect(ChatMessages).toHaveBeenCalledWith({
@@ -167,7 +162,7 @@ describe('useChatMessagesInstance', () => {
 		expect(ChatMessages).toHaveBeenCalledTimes(1);
 		expect(updateSubscriptionMock).toHaveBeenCalledTimes(1);
 
-		(useE2EERoomState as jest.Mock).mockReturnValue(E2ERoomState.WAITING_KEYS);
+		(useE2EERoomState as jest.Mock).mockReturnValue('WAITING_KEYS');
 
 		rerender();
 
@@ -190,7 +185,7 @@ describe('useChatMessagesInstance', () => {
 			tmid: 'threadId',
 			encrypted: false,
 		};
-		const { result, rerender } = renderHook((props = initialProps) => useChatMessagesInstance(props as any), { legacyRoot: true });
+		const { result, rerender } = renderHook((props = initialProps) => useChatMessagesInstance(props as any));
 
 		expect(ChatMessages).toHaveBeenCalledWith({
 			rid: mockSubscription.rid,

@@ -1,22 +1,20 @@
 import { action } from '@storybook/addon-actions';
-import type { ComponentMeta, ComponentStory } from '@storybook/react';
-import React from 'react';
+import type { Meta, StoryFn } from '@storybook/react';
 
 import SidebarTogglerButton from './SidebarTogglerButton';
 
 export default {
-	title: 'Components/SidebarToggler/SidebarTogglerButton',
 	component: SidebarTogglerButton,
 	parameters: {
 		layout: 'centered',
 		controls: { hideNoControlsWarning: true },
 		actions: { argTypesRegex: '^on.*' },
 	},
-} as ComponentMeta<typeof SidebarTogglerButton>;
+} satisfies Meta<typeof SidebarTogglerButton>;
 
-export const Example: ComponentStory<typeof SidebarTogglerButton> = () => <SidebarTogglerButton onClick={action('onClick')} />;
+export const Example: StoryFn<typeof SidebarTogglerButton> = () => <SidebarTogglerButton onClick={action('onClick')} />;
 
-const Template: ComponentStory<typeof SidebarTogglerButton> = (args) => <SidebarTogglerButton {...args} />;
+const Template: StoryFn<typeof SidebarTogglerButton> = (args) => <SidebarTogglerButton {...args} />;
 
 export const Default = Template.bind({});
 export const WithBadge = Template.bind({});

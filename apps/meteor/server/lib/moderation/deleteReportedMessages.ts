@@ -13,11 +13,10 @@ export async function deleteReportedMessages(messages: IMessage[], user: IUser):
 	const files: string[] = [];
 	const messageIds: string[] = [];
 	for (const message of messages) {
-		if (message.file) {
-			files.push(message.file._id);
-		}
 		if (message.files && message.files.length > 0) {
-			files.concat(message.files.map((file) => file._id));
+			files.push(...message.files.map((file) => file._id));
+		} else if (message.file) {
+			files.push(message.file._id);
 		}
 		messageIds.push(message._id);
 	}
@@ -49,13 +48,16 @@ export async function deleteReportedMessages(messages: IMessage[], user: IUser):
 		await Messages.setAsDeletedByIdsAndUser(messageIds, user as any);
 	}
 
-	const transformed = messages.reduce((acc, { rid, _id }) => {
-		if (!acc[rid]) {
-			acc[rid] = [];
-		}
-		acc[rid].push(_id);
-		return acc;
-	}, {} as Record<string, string[]>);
+	const transformed = messages.reduce(
+		(acc, { rid, _id }) => {
+			if (!acc[rid]) {
+				acc[rid] = [];
+			}
+			acc[rid].push(_id);
+			return acc;
+		},
+		{} as Record<string, string[]>,
+	);
 
 	Object.entries(transformed).forEach(([rid, messageIds]) => {
 		void api.broadcast('notify.deleteMessageBulk', rid, {

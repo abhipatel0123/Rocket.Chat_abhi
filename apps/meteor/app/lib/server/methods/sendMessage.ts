@@ -1,22 +1,40 @@
 import { api } from '@rocket.chat/core-services';
-import type { AtLeast, IMessage, IUser } from '@rocket.chat/core-typings';
+import type { AtLeast, IMessage, IUser, IUploadToConfirm } from '@rocket.chat/core-typings';
 import type { ServerMethods } from '@rocket.chat/ddp-client';
+import type { RocketchatI18nKeys } from '@rocket.chat/i18n';
+import { MessageTypes } from '@rocket.chat/message-types';
 import { Messages, Users } from '@rocket.chat/models';
-import { check } from 'meteor/check';
+import type { TOptions } from 'i18next';
+import { check, Match } from 'meteor/check';
 import { Meteor } from 'meteor/meteor';
 import moment from 'moment';
 
+import { MAX_MULTIPLE_UPLOADED_FILES } from '../../../../lib/constants';
 import { i18n } from '../../../../server/lib/i18n';
 import { SystemLogger } from '../../../../server/lib/logger/system';
 import { canSendMessageAsync } from '../../../authorization/server/functions/canSendMessage';
 import { hasPermissionAsync } from '../../../authorization/server/functions/hasPermission';
+import { applyAirGappedRestrictionsValidation } from '../../../license/server/airGappedRestrictionsWrapper';
 import { metrics } from '../../../metrics/server';
 import { settings } from '../../../settings/server';
-import { MessageTypes } from '../../../ui-utils/server';
 import { sendMessage } from '../functions/sendMessage';
 import { RateLimiter } from '../lib';
 
-export async function executeSendMessage(uid: IUser['_id'], message: AtLeast<IMessage, 'rid'>, previewUrls?: string[]) {
+/**
+ *
+ * @param uid
+ * @param message
+ * @param extraInfo
+ *   - ts: The timestamp of the message. the message object already has a ts, but this value is validated and only a window of 10 seconds is allowed to be used. this value overrides the message.ts value without validation.
+ *
+ *
+ * @returns
+ */
+export async function executeSendMessage(
+	uid: IUser['_id'],
+	message: AtLeast<IMessage, 'rid'>,
+	extraInfo?: { ts?: Date; previewUrls?: string[]; filesToConfirm?: IUploadToConfirm[] },
+) {
 	if (message.tshow && !message.tmid) {
 		throw new Meteor.Error('invalid-params', 'tshow provided but missing tmid', {
 			method: 'sendMessage',
@@ -29,7 +47,10 @@ export async function executeSendMessage(uid: IUser['_id'], message: AtLeast<IMe
 		});
 	}
 
-	if (message.ts) {
+	const isTimestampFromClient = Boolean(!extraInfo?.ts && message.ts);
+	const now = new Date();
+	message.ts = extraInfo?.ts ?? message.ts ?? now;
+	if (isTimestampFromClient) {
 		const tsDiff = Math.abs(moment(message.ts).diff(Date.now()));
 		if (tsDiff > 60000) {
 			throw new Meteor.Error('error-message-ts-out-of-sync', 'Message timestamp is out of sync', {
@@ -37,11 +58,10 @@ export async function executeSendMessage(uid: IUser['_id'], message: AtLeast<IMe
 				message_ts: message.ts,
 				server_ts: new Date().getTime(),
 			});
-		} else if (tsDiff > 10000) {
-			message.ts = new Date();
 		}
-	} else {
-		message.ts = new Date();
+		if (tsDiff > 10000) {
+			message.ts = now;
+		}
 	}
 
 	if (message.msg) {
@@ -52,13 +72,7 @@ export async function executeSendMessage(uid: IUser['_id'], message: AtLeast<IMe
 		}
 	}
 
-	const user = await Users.findOneById(uid, {
-		projection: {
-			username: 1,
-			type: 1,
-			name: 1,
-		},
-	});
+	const user = await Users.findOneById(uid);
 	if (!user?.username) {
 		throw new Meteor.Error('error-invalid-user', 'Invalid user');
 	}
@@ -93,14 +107,14 @@ export async function executeSendMessage(uid: IUser['_id'], message: AtLeast<IMe
 		}
 
 		metrics.messagesSent.inc(); // TODO This line needs to be moved to it's proper place. See the comments on: https://github.com/RocketChat/Rocket.Chat/pull/5736
-		return await sendMessage(user, message, room, false, previewUrls);
+		return await sendMessage(user, message, room, { previewUrls: extraInfo?.previewUrls, filesToConfirm: extraInfo?.filesToConfirm });
 	} catch (err: any) {
 		SystemLogger.error({ msg: 'Error sending message:', err });
 
-		const errorMessage = typeof err === 'string' ? err : err.error || err.message;
-		const errorContext = err.details ?? {};
+		const errorMessage: RocketchatI18nKeys = typeof err === 'string' ? err : err.error || err.message;
+		const errorContext: TOptions = err.details ?? {};
 		void api.broadcast('notify.ephemeralMessage', uid, message.rid, {
-			msg: i18n.t(errorMessage, errorContext, user.language),
+			msg: i18n.t(errorMessage, { ...errorContext, lng: user.language }),
 		});
 
 		if (typeof err === 'string') {
@@ -114,13 +128,59 @@ export async function executeSendMessage(uid: IUser['_id'], message: AtLeast<IMe
 declare module '@rocket.chat/ddp-client' {
 	// eslint-disable-next-line @typescript-eslint/naming-convention
 	interface ServerMethods {
-		sendMessage(message: AtLeast<IMessage, '_id' | 'rid' | 'msg'>, previewUrls?: string[]): any;
+		sendMessage(message: AtLeast<IMessage, '_id' | 'rid' | 'msg'>, previewUrls?: string[], filesToConfirm?: IUploadToConfirm[]): any;
 	}
 }
 
 Meteor.methods<ServerMethods>({
-	async sendMessage(message, previewUrls) {
-		check(message, Object);
+	async sendMessage(message, previewUrls, filesToConfirm) {
+		check(message, {
+			_id: Match.Maybe(String),
+			rid: Match.Maybe(String),
+			msg: Match.Maybe(String),
+			tmid: Match.Maybe(String),
+			tshow: Match.Maybe(Boolean),
+			ts: Match.Maybe(Date),
+			t: Match.Maybe(String),
+			bot: Match.Maybe(Object),
+			content: Match.Maybe(Object),
+			e2e: Match.Maybe(String),
+			e2eMentions: Match.Maybe(Object),
+			customFields: Match.Maybe(Object),
+			federation: Match.Maybe(Object),
+			groupable: Match.Maybe(Boolean),
+			sentByEmail: Match.Maybe(Boolean),
+		});
+
+		check(
+			filesToConfirm,
+			Match.Maybe([
+				Match.ObjectIncluding({
+					_id: String,
+					name: Match.Maybe(String),
+					content: Match.Maybe(
+						Match.OneOf(
+							{
+								algorithm: 'rc.v1.aes-sha2',
+								ciphertext: String,
+							},
+							{
+								algorithm: 'rc.v2.aes-sha2',
+								ciphertext: String,
+								kid: String,
+								iv: String,
+							},
+						),
+					),
+				}),
+			]),
+		);
+
+		if (filesToConfirm && filesToConfirm.length > MAX_MULTIPLE_UPLOADED_FILES) {
+			throw new Meteor.Error('error-too-many-files', `Cannot send more than ${MAX_MULTIPLE_UPLOADED_FILES} files in one message`, {
+				method: 'sendMessage',
+			});
+		}
 
 		const uid = Meteor.userId();
 		if (!uid) {
@@ -134,9 +194,9 @@ Meteor.methods<ServerMethods>({
 		}
 
 		try {
-			return await executeSendMessage(uid, message, previewUrls);
+			return await applyAirGappedRestrictionsValidation(() => executeSendMessage(uid, message, { previewUrls, filesToConfirm }));
 		} catch (error: any) {
-			if ((error.error || error.message) === 'error-not-allowed') {
+			if (['error-not-allowed', 'restricted-workspace'].includes(error.error || error.message)) {
 				throw new Meteor.Error(error.error || error.message, error.reason, {
 					method: 'sendMessage',
 				});

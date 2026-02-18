@@ -5,8 +5,6 @@ import type { Serialized } from '@rocket.chat/core-typings';
 import { createContext } from 'react';
 
 import type { IAppExternalURL, ICategory } from '../apps/@types/IOrchestrator';
-import type { AsyncState } from '../lib/asyncState';
-import { AsyncStatePhase } from '../lib/asyncState';
 import type { App } from '../views/marketplace/types';
 
 export interface IAppsOrchestrator {
@@ -14,7 +12,7 @@ export interface IAppsOrchestrator {
 	getAppClientManager(): AppClientManager;
 	handleError(error: unknown): void;
 	getInstalledApps(): Promise<App[]>;
-	getAppsFromMarketplace(isAdminUser?: boolean): Promise<App[]>;
+	getAppsFromMarketplace(isAdminUser?: boolean): Promise<{ apps: App[]; error?: unknown }>;
 	getAppsOnBundle(bundleId: string): Promise<App[]>;
 	getApp(appId: string): Promise<App>;
 	setAppSettings(appId: string, settings: ISetting[]): Promise<void>;
@@ -26,27 +24,6 @@ export interface IAppsOrchestrator {
 	getCategories(): Promise<Serialized<ICategory[]>>;
 }
 
-export type AppsContextValue = {
-	installedApps: Omit<AsyncState<{ apps: App[] }>, 'error'>;
-	marketplaceApps: Omit<AsyncState<{ apps: App[] }>, 'error'>;
-	privateApps: Omit<AsyncState<{ apps: App[] }>, 'error'>;
-	reload: () => Promise<void>;
-	orchestrator?: IAppsOrchestrator;
-};
+type AppsContextValue = IAppsOrchestrator | undefined;
 
-export const AppsContext = createContext<AppsContextValue>({
-	installedApps: {
-		phase: AsyncStatePhase.LOADING,
-		value: undefined,
-	},
-	marketplaceApps: {
-		phase: AsyncStatePhase.LOADING,
-		value: undefined,
-	},
-	privateApps: {
-		phase: AsyncStatePhase.LOADING,
-		value: undefined,
-	},
-	reload: () => Promise.resolve(),
-	orchestrator: undefined,
-});
+export const AppsContext = createContext<AppsContextValue>(undefined);

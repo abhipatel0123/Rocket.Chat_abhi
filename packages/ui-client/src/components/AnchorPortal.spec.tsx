@@ -3,16 +3,28 @@ import { render, screen } from '@testing-library/react';
 import AnchorPortal from './AnchorPortal';
 
 it('should render children', () => {
-	render(<AnchorPortal id='test-anchor' children={<div role='presentation' aria-label='example' />} />, { legacyRoot: true });
+	render(
+		<AnchorPortal id='test-anchor'>
+			<div role='presentation' aria-label='example' />
+		</AnchorPortal>,
+	);
 
 	expect(screen.getByRole('presentation', { name: 'example' })).toBeInTheDocument();
 });
 
 it('should not recreate the anchor element', () => {
-	render(<AnchorPortal id='test-anchor' children={<div role='presentation' aria-label='example A' />} />, { legacyRoot: true });
+	render(
+		<AnchorPortal id='test-anchor'>
+			<div role='presentation' aria-label='example A' />
+		</AnchorPortal>,
+	);
 	const anchorA = document.getElementById('test-anchor');
 
-	render(<AnchorPortal id='test-anchor' children={<div role='presentation' aria-label='example B' />} />, { legacyRoot: true });
+	render(
+		<AnchorPortal id='test-anchor'>
+			<div role='presentation' aria-label='example B' />
+		</AnchorPortal>,
+	);
 	const anchorB = document.getElementById('test-anchor');
 
 	expect(anchorA).toBe(anchorB);
@@ -21,9 +33,11 @@ it('should not recreate the anchor element', () => {
 });
 
 it('should remove the anchor element when unmounted', () => {
-	const { unmount } = render(<AnchorPortal id='test-anchor' children={<div role='presentation' aria-label='example' />} />, {
-		legacyRoot: true,
-	});
+	const { unmount } = render(
+		<AnchorPortal id='test-anchor'>
+			<div role='presentation' aria-label='example' />
+		</AnchorPortal>,
+	);
 	expect(document.getElementById('test-anchor')).toBeInTheDocument();
 
 	unmount();
@@ -31,14 +45,18 @@ it('should remove the anchor element when unmounted', () => {
 });
 
 it('should not remove the anchor element after unmounting if there are other portals with the same id', () => {
-	const { unmount } = render(<AnchorPortal id='test-anchor' children={<div role='presentation' aria-label='example' />} />, {
-		legacyRoot: true,
-	});
+	const { unmount } = render(
+		<AnchorPortal id='test-anchor'>
+			<div role='presentation' aria-label='example' />
+		</AnchorPortal>,
+	);
 	expect(document.getElementById('test-anchor')).toBeInTheDocument();
 
-	render(<AnchorPortal id='test-anchor' children={<div role='presentation' aria-label='example' />} />, {
-		legacyRoot: true,
-	});
+	render(
+		<AnchorPortal id='test-anchor'>
+			<div role='presentation' aria-label='example' />
+		</AnchorPortal>,
+	);
 	unmount();
 
 	expect(document.getElementById('test-anchor')).toBeInTheDocument();

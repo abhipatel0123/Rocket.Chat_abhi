@@ -1,17 +1,26 @@
-import type { ILicenseTag, ILicenseV3, LicenseLimit, LicenseModule, LicensePeriod, Timestamp } from '@rocket.chat/core-typings';
+import { CoreModules } from '@rocket.chat/core-typings';
+import type {
+	InternalModuleName,
+	GrantedModules,
+	ILicenseTag,
+	ILicenseV3,
+	LicenseLimit,
+	LicenseModule,
+	LicensePeriod,
+} from '@rocket.chat/core-typings';
 
-import { encrypt } from './token';
+import { encrypt, encryptStatsToken } from './token';
 
 export class MockedLicenseBuilder {
 	information: {
 		id?: string;
 		autoRenew: boolean;
-		visualExpiration?: Timestamp;
-		notifyAdminsAt?: Timestamp;
-		notifyUsersAt?: Timestamp;
+		visualExpiration?: string;
+		notifyAdminsAt?: string;
+		notifyUsersAt?: string;
 		trial: boolean;
 		offline: boolean;
-		createdAt: Timestamp;
+		createdAt: string;
 		grantedBy: {
 			method: 'manual' | 'self-service' | 'sales' | 'support' | 'reseller';
 			seller?: string;
@@ -163,9 +172,7 @@ export class MockedLicenseBuilder {
 		return this;
 	}
 
-	grantedModules: {
-		module: LicenseModule;
-	}[] = [];
+	grantedModules: GrantedModules = [];
 
 	limits: {
 		activeUsers?: LicenseLimit[];
@@ -190,13 +197,15 @@ export class MockedLicenseBuilder {
 		return this;
 	}
 
-	public withGratedModules(modules: LicenseModule[]): this {
+	public withGrantedModules(modules: LicenseModule[]): this {
 		this.grantedModules = this.grantedModules ?? [];
-		this.grantedModules.push(...modules.map((module) => ({ module })));
+		this.grantedModules.push(
+			...(modules.map((module) => ({ module, external: !CoreModules.includes(module as InternalModuleName) })) as GrantedModules),
+		);
 		return this;
 	}
 
-	withNoGratedModules(modules: LicenseModule[]): this {
+	withNoGrantedModules(modules: LicenseModule[]): this {
 		this.grantedModules = this.grantedModules ?? [];
 		this.grantedModules = this.grantedModules.filter(({ module }) => !modules.includes(module));
 		return this;
@@ -229,5 +238,33 @@ export class MockedLicenseBuilder {
 
 	public sign(): Promise<string> {
 		return encrypt(this.build());
+	}
+}
+
+export class StatsTokenBuilder {
+	private token: Record<string, any>;
+
+	constructor() {
+		this.token = {
+			workspaceId: '123456789',
+			uniqueId: '123456789',
+			recordId: '123456789',
+			timestamp: new Date().toISOString(),
+			info: {},
+		};
+	}
+
+	public withTimeStamp(date: Date): StatsTokenBuilder {
+		this.token.timestamp = date.toISOString();
+
+		return this;
+	}
+
+	public build(): Record<string, any> {
+		return this.token;
+	}
+
+	public sign(): Promise<string> {
+		return encryptStatsToken(this.token);
 	}
 }

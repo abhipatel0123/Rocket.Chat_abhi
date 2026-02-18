@@ -4,8 +4,8 @@ import { ImportData } from '@rocket.chat/models';
 import { Random } from '@rocket.chat/random';
 import { type FindCursor, ObjectId } from 'mongodb';
 
-import type { IConversionCallbacks } from '../../definitions/IConversionCallbacks';
 import { ConverterCache } from './ConverterCache';
+import type { IConversionCallbacks } from '../../definitions/IConversionCallbacks';
 
 export type RecordConverterOptions = {
 	workInMemory?: boolean;
@@ -26,6 +26,8 @@ export class RecordConverter<R extends IImportRecord, T extends RecordConverterO
 	protected skippedCount = 0;
 
 	protected failedCount = 0;
+
+	protected newCount = 0;
 
 	public aborted = false;
 
@@ -106,7 +108,11 @@ export class RecordConverter<R extends IImportRecord, T extends RecordConverterO
 	}
 
 	protected async saveError(importId: string, error: Error): Promise<void> {
-		this._logger.error(error);
+		this._logger.error({
+			msg: 'Import record conversion failed',
+			importId,
+			err: error,
+		});
 		this.saveErrorToMemory(importId, error);
 
 		if (!this._converterOptions.workInMemory) {
@@ -194,11 +200,13 @@ export class RecordConverter<R extends IImportRecord, T extends RecordConverterO
 		afterImportFn,
 		onErrorFn,
 		processRecord,
+		afterBatchFn,
 	}: IConversionCallbacks & { processRecord?: (record: R) => Promise<boolean | undefined> } = {}): Promise<void> {
 		const records = await this.getDataToImport();
 
 		this.skippedCount = 0;
 		this.failedCount = 0;
+		this.newCount = 0;
 
 		for await (const record of records) {
 			const { _id } = record;
@@ -214,8 +222,11 @@ export class RecordConverter<R extends IImportRecord, T extends RecordConverterO
 
 				const isNew = await (processRecord || this.convertRecord).call(this, record);
 
-				if (typeof isNew === 'boolean' && afterImportFn) {
-					await afterImportFn(record, isNew);
+				if (typeof isNew === 'boolean') {
+					this.newCount++;
+					if (afterImportFn) {
+						await afterImportFn(record, isNew);
+					}
 				}
 			} catch (e) {
 				this.failedCount++;
@@ -224,6 +235,9 @@ export class RecordConverter<R extends IImportRecord, T extends RecordConverterO
 					await onErrorFn();
 				}
 			}
+		}
+		if (afterBatchFn) {
+			await afterBatchFn(this.newCount, this.failedCount);
 		}
 	}
 

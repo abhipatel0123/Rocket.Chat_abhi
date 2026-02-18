@@ -1,20 +1,25 @@
 import type { ILicenseTag } from './ILicenseTag';
 import type { LicenseLimit } from './LicenseLimit';
-import type { LicenseModule } from './LicenseModule';
-import type { LicensePeriod, Timestamp } from './LicensePeriod';
+import type { ExternalModuleName, InternalModuleName } from './LicenseModule';
+import type { LicensePeriod } from './LicensePeriod';
+
+export type InternalModule = { module: InternalModuleName; external?: false };
+export type ExternalModule = { module: ExternalModuleName; external: true };
+
+export type GrantedModules = (InternalModule | ExternalModule)[];
 
 export interface ILicenseV3 {
 	version: '3.0';
 	information: {
 		id?: string;
 		autoRenew: boolean;
-		visualExpiration?: Timestamp;
-		notifyAdminsAt?: Timestamp;
-		notifyUsersAt?: Timestamp;
+		visualExpiration?: string;
+		notifyAdminsAt?: string;
+		notifyUsersAt?: string;
 		trial: boolean;
 		cancellable?: boolean;
 		offline: boolean;
-		createdAt: Timestamp;
+		createdAt: string;
 		grantedBy: {
 			method: 'manual' | 'self-service' | 'sales' | 'support' | 'reseller';
 			seller?: string;
@@ -48,9 +53,7 @@ export interface ILicenseV3 {
 			allowedStaleInDays?: number;
 		};
 	};
-	grantedModules: {
-		module: LicenseModule;
-	}[];
+	grantedModules: GrantedModules;
 	limits: {
 		activeUsers?: LicenseLimit[];
 		guestUsers?: LicenseLimit[];

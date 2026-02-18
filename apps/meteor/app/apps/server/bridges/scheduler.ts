@@ -4,7 +4,7 @@ import type { IAppServerOrchestrator } from '@rocket.chat/apps';
 import type { IProcessor, IOnetimeSchedule, IRecurringSchedule, IJobContext } from '@rocket.chat/apps-engine/definition/scheduler';
 import { StartupType } from '@rocket.chat/apps-engine/definition/scheduler';
 import { SchedulerBridge } from '@rocket.chat/apps-engine/server/bridges/SchedulerBridge';
-import { ObjectID } from 'bson';
+import { ObjectId } from 'bson';
 import { MongoInternals } from 'meteor/mongo';
 
 function _callProcessor(processor: IProcessor['processor']): (job: Job) => Promise<void> {
@@ -84,9 +84,7 @@ export class AppSchedulerBridge extends SchedulerBridge {
 					);
 					break;
 				default:
-					this.orch
-						.getRocketChatLogger()
-						.error(`Invalid startup setting type (${String((startupSetting as any).type)}) for the processor ${id}`);
+					this.orch.getRocketChatLogger().error({ msg: 'Unknown startup setting type', type: (startupSetting as any).type });
 					break;
 			}
 		});
@@ -105,8 +103,8 @@ export class AppSchedulerBridge extends SchedulerBridge {
 			await this.startScheduler();
 			const job = await this.scheduler.schedule(when, id, this.decorateJobData(data, appId));
 			return job.attrs._id.toString();
-		} catch (e) {
-			this.orch.getRocketChatLogger().error(e);
+		} catch (err) {
+			this.orch.getRocketChatLogger().error({ err });
 		}
 	}
 
@@ -140,8 +138,8 @@ export class AppSchedulerBridge extends SchedulerBridge {
 				skipImmediate,
 			});
 			return job.attrs._id.toString();
-		} catch (e) {
-			this.orch.getRocketChatLogger().error(e);
+		} catch (err) {
+			this.orch.getRocketChatLogger().error({ err });
 		}
 	}
 
@@ -159,7 +157,7 @@ export class AppSchedulerBridge extends SchedulerBridge {
 
 		let cancelQuery;
 		try {
-			cancelQuery = { _id: new ObjectID(jobId.split('_')[0]) };
+			cancelQuery = { _id: new ObjectId(jobId.split('_')[0]) };
 		} catch (jobDocIdError) {
 			// it is not a valid objectid, so it won't try to cancel by document id
 			cancelQuery = { name: jobId };
@@ -167,8 +165,8 @@ export class AppSchedulerBridge extends SchedulerBridge {
 
 		try {
 			await this.scheduler.cancel(cancelQuery);
-		} catch (e) {
-			this.orch.getRocketChatLogger().error(e);
+		} catch (err) {
+			this.orch.getRocketChatLogger().error({ err });
 		}
 	}
 
@@ -185,8 +183,8 @@ export class AppSchedulerBridge extends SchedulerBridge {
 		const matcher = new RegExp(`_${appId}$`);
 		try {
 			await this.scheduler.cancel({ name: { $regex: matcher } });
-		} catch (e) {
-			this.orch.getRocketChatLogger().error(e);
+		} catch (err) {
+			this.orch.getRocketChatLogger().error({ err });
 		}
 	}
 

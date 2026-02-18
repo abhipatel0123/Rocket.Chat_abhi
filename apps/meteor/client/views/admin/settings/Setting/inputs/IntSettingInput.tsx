@@ -1,6 +1,5 @@
-import { Field, FieldLabel, FieldRow, InputBox } from '@rocket.chat/fuselage';
+import { Field, FieldHint, FieldLabel, FieldRow, InputBox } from '@rocket.chat/fuselage';
 import type { FormEventHandler, ReactElement } from 'react';
-import React from 'react';
 
 import ResetSettingButton from '../ResetSettingButton';
 import type { SettingInputProps } from './types';
@@ -13,6 +12,7 @@ function IntSettingInput({
 	_id,
 	label,
 	value,
+	hint,
 	placeholder,
 	readonly,
 	autocomplete,
@@ -32,11 +32,10 @@ function IntSettingInput({
 				<FieldLabel htmlFor={_id} title={_id} required={required}>
 					{label}
 				</FieldLabel>
-				{hasResetButton && <ResetSettingButton data-qa-reset-setting-id={_id} onClick={onResetButtonClick} />}
+				{hasResetButton && <ResetSettingButton onClick={onResetButtonClick} />}
 			</FieldRow>
 			<FieldRow>
 				<InputBox
-					data-qa-setting-id={_id}
 					id={_id}
 					type='number'
 					value={value}
@@ -47,6 +46,7 @@ function IntSettingInput({
 					onChange={handleChange}
 				/>
 			</FieldRow>
+			{hint && <FieldHint>{hint}</FieldHint>}
 		</Field>
 	);
 }

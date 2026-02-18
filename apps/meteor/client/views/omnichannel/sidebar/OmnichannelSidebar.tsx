@@ -1,6 +1,5 @@
 import { useTranslation, useLayout, useCurrentRoutePath } from '@rocket.chat/ui-contexts';
-import React, { memo } from 'react';
-import { useSyncExternalStore } from 'use-sync-external-store/shim';
+import { memo, useSyncExternalStore } from 'react';
 
 import Sidebar from '../../../components/Sidebar';
 import SidebarItemsAssemblerProps from '../../../components/Sidebar/SidebarItemsAssembler';
@@ -16,8 +15,8 @@ const OmnichannelSidebar = () => {
 	const currentPath = useCurrentRoutePath();
 
 	return (
-		<SettingsProvider privileged>
-			<Sidebar>
+		<SettingsProvider>
+			<Sidebar aria-label={t('Omnichannel')}>
 				<Sidebar.Header onClose={sidebar.close} title={t('Omnichannel')} />
 				<Sidebar.Content>
 					<SidebarItemsAssemblerProps items={items} currentPath={currentPath} />

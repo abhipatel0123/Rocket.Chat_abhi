@@ -1,6 +1,8 @@
-import { Message } from '@rocket.chat/fuselage';
-import { useTranslation } from '@rocket.chat/ui-contexts';
-import { memo, ReactElement, useContext, useMemo, KeyboardEvent } from 'react';
+import { MessageHighlight } from '@rocket.chat/fuselage';
+import { useButtonPattern } from '@rocket.chat/fuselage-hooks';
+import type { ReactElement } from 'react';
+import { memo, useContext, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { MarkupInteractionContext } from '../MarkupInteractionContext';
 
@@ -12,26 +14,27 @@ const handleUserMention = (mention: string | undefined, withSymbol: boolean | un
 	withSymbol ? `@${mention}` : mention;
 
 const UserMentionElement = ({ mention }: UserMentionElementProps): ReactElement => {
-	const t = useTranslation();
+	const { t } = useTranslation();
 	const { resolveUserMention, onUserMentionClick, ownUserId, useRealName, showMentionSymbol, triggerProps } =
 		useContext(MarkupInteractionContext);
 
 	const resolved = useMemo(() => resolveUserMention?.(mention), [mention, resolveUserMention]);
 	const handleClick = useMemo(() => (resolved ? onUserMentionClick?.(resolved) : undefined), [resolved, onUserMentionClick]);
+	const buttonProps = useButtonPattern((e) => handleClick?.(e));
 
 	if (mention === 'all') {
 		return (
-			<Message.Highlight title={t('Mentions_all_room_members')} variant='relevant'>
+			<MessageHighlight title={t('Mentions_all_room_members')} variant='relevant'>
 				{handleUserMention('all', showMentionSymbol)}
-			</Message.Highlight>
+			</MessageHighlight>
 		);
 	}
 
 	if (mention === 'here') {
 		return (
-			<Message.Highlight title={t('Mentions_online_room_members')} variant='relevant'>
+			<MessageHighlight title={t('Mentions_online_room_members')} variant='relevant'>
 				{handleUserMention('here', showMentionSymbol)}
-			</Message.Highlight>
+			</MessageHighlight>
 		);
 	}
 
@@ -40,21 +43,16 @@ const UserMentionElement = ({ mention }: UserMentionElementProps): ReactElement 
 	}
 
 	return (
-		<Message.Highlight
+		<MessageHighlight
 			variant={resolved._id === ownUserId ? 'critical' : 'other'}
 			title={resolved._id === ownUserId ? t('Mentions_you') : t('Mentions_user')}
 			clickable
-			tabIndex={0}
-			role='button'
-			onClick={handleClick}
-			onKeyDown={(e: KeyboardEvent<HTMLSpanElement>): void => {
-				(e.code === 'Enter' || e.code === 'Space') && handleClick?.(e);
-			}}
+			{...buttonProps}
 			{...triggerProps}
 			data-uid={resolved._id}
 		>
 			{handleUserMention((useRealName ? resolved.name : resolved.username) ?? mention, showMentionSymbol)}
-		</Message.Highlight>
+		</MessageHighlight>
 	);
 };
 

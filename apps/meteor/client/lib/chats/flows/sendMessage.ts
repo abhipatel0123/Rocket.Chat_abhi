@@ -1,18 +1,18 @@
 import type { IMessage } from '@rocket.chat/core-typings';
 
-import { KonchatNotification } from '../../../../app/ui/client/lib/KonchatNotification';
 import { sdk } from '../../../../app/utils/client/lib/SDKClient';
 import { t } from '../../../../app/utils/lib/i18n';
 import { onClientBeforeSendMessage } from '../../onClientBeforeSendMessage';
 import { dispatchToastMessage } from '../../toast';
 import type { ChatAPI } from '../ChatAPI';
 import { processMessageEditing } from './processMessageEditing';
+import { processMessageUploads } from './processMessageUploads';
 import { processSetReaction } from './processSetReaction';
 import { processSlashCommand } from './processSlashCommand';
 import { processTooLongMessage } from './processTooLongMessage';
 
 const process = async (chat: ChatAPI, message: IMessage, previewUrls?: string[], isSlashCommandAllowed?: boolean): Promise<void> => {
-	KonchatNotification.removeRoomNotification(message.rid);
+	const mid = chat.currentEditingMessage.getMID();
 
 	if (await processSetReaction(chat, message)) {
 		return;
@@ -26,10 +26,15 @@ const process = async (chat: ChatAPI, message: IMessage, previewUrls?: string[],
 		return;
 	}
 
-	message = (await onClientBeforeSendMessage(message)) as IMessage;
+	if (await processMessageUploads(chat, message)) {
+		return;
+	}
+
+	message = (await onClientBeforeSendMessage({ ...message, isEditing: !!mid })) as IMessage & { isEditing?: boolean };
 
 	// e2e should be a client property only
 	delete message.e2e;
+	delete (message as IMessage & { isEditing?: boolean }).isEditing;
 
 	if (await processMessageEditing(chat, message, previewUrls)) {
 		return;
@@ -45,7 +50,8 @@ export const sendMessage = async (
 		tshow,
 		previewUrls,
 		isSlashCommandAllowed,
-	}: { text: string; tshow?: boolean; previewUrls?: string[]; isSlashCommandAllowed?: boolean },
+		tmid,
+	}: { text: string; tshow?: boolean; previewUrls?: string[]; isSlashCommandAllowed?: boolean; tmid?: IMessage['tmid'] },
 ): Promise<boolean> => {
 	if (!(await chat.data.isSubscribedToRoom())) {
 		try {
@@ -58,32 +64,33 @@ export const sendMessage = async (
 
 	chat.readStateManager.clearUnreadMark();
 
-	text = text.trim();
+	const uploadsStore = tmid ? chat.threadUploads : chat.uploads;
 
-	if (!text && !chat.currentEditing) {
+	text = text.trim();
+	const mid = chat.currentEditingMessage.getMID();
+
+	const hasFiles = uploadsStore.get().length > 0;
+	if (!text && !mid && !hasFiles) {
 		// Nothing to do
 		return false;
 	}
 
-	if (text) {
+	if (text || hasFiles) {
 		const message = await chat.data.composeMessage(text, {
 			sendToChannel: tshow,
 			quotedMessages: chat.composer?.quotedMessages.get() ?? [],
-			originalMessage: chat.currentEditing ? await chat.data.findMessageByID(chat.currentEditing.mid) : null,
+			originalMessage: mid ? await chat.data.findMessageByID(mid) : null,
 		});
 
-		if (chat.currentEditing) {
-			const originalMessage = await chat.data.findMessageByID(chat.currentEditing.mid);
+		// When editing an encrypted message with files, preserve the original attachments/files
+		// This ensures they're included in the re-encryption process
+		if (mid) {
+			const originalMessage = await chat.data.findMessageByID(mid);
 
-			if (
-				originalMessage?.t === 'e2e' &&
-				originalMessage.attachments &&
-				originalMessage.attachments.length > 0 &&
-				originalMessage.attachments[0].description !== undefined
-			) {
-				originalMessage.attachments[0].description = message.msg;
+			if (originalMessage?.t === 'e2e' && originalMessage.attachments && originalMessage.attachments.length > 0) {
 				message.attachments = originalMessage.attachments;
-				message.msg = originalMessage.msg;
+				message.files = originalMessage.files;
+				message.file = originalMessage.file;
 			}
 		}
 
@@ -96,8 +103,8 @@ export const sendMessage = async (
 		return true;
 	}
 
-	if (chat.currentEditing) {
-		const originalMessage = await chat.data.findMessageByID(chat.currentEditing.mid);
+	if (mid) {
+		const originalMessage = await chat.data.findMessageByID(mid);
 
 		if (!originalMessage) {
 			dispatchToastMessage({ type: 'warning', message: t('Message_not_found') });
@@ -106,11 +113,11 @@ export const sendMessage = async (
 
 		try {
 			if (await chat.flows.processMessageEditing({ ...originalMessage, msg: '' }, previewUrls)) {
-				chat.currentEditing.stop();
+				chat.currentEditingMessage.stop();
 				return false;
 			}
 
-			await chat.currentEditing?.reset();
+			await chat.currentEditingMessage.reset();
 			await chat.flows.requestMessageDeletion(originalMessage);
 			return false;
 		} catch (error) {

@@ -1,8 +1,6 @@
-import Ajv from 'ajv';
+import type { IUserSettings } from '@rocket.chat/core-typings';
 
-const ajv = new Ajv({
-	coerceTypes: true,
-});
+import { ajv } from '../Ajv';
 
 export type UsersUpdateParamsPOST = {
 	userId: string;
@@ -16,13 +14,15 @@ export type UsersUpdateParamsPOST = {
 		nickname?: string;
 		statusText?: string;
 		roles?: string[];
-		joinDefaultChannels?: boolean;
 		requirePasswordChange?: boolean;
 		setRandomPassword?: boolean;
 		sendWelcomeEmail?: boolean;
 		verified?: boolean;
 		customFields?: Record<string, unknown>;
+		settings?: IUserSettings;
+		language?: string;
 		status?: string;
+		freeSwitchExtension?: string;
 	};
 	confirmRelinquish?: boolean;
 };
@@ -32,6 +32,7 @@ const UsersUpdateParamsPostSchema = {
 	properties: {
 		userId: {
 			type: 'string',
+			minLength: 1,
 		},
 		confirmRelinquish: {
 			type: 'boolean',
@@ -78,10 +79,6 @@ const UsersUpdateParamsPostSchema = {
 					},
 					nullable: true,
 				},
-				joinDefaultChannels: {
-					type: 'boolean',
-					nullable: true,
-				},
 				requirePasswordChange: {
 					type: 'boolean',
 					nullable: true,
@@ -103,6 +100,10 @@ const UsersUpdateParamsPostSchema = {
 					nullable: true,
 				},
 				status: {
+					type: 'string',
+					nullable: true,
+				},
+				freeSwitchExtension: {
 					type: 'string',
 					nullable: true,
 				},

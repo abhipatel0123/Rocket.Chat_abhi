@@ -1,7 +1,6 @@
 import type { OutgoingIntegrationEvent } from '@rocket.chat/core-typings';
-import Ajv from 'ajv';
 
-const ajv = new Ajv();
+import { ajv } from '../Ajv';
 
 export type IntegrationsUpdateProps =
 	| {
@@ -9,7 +8,7 @@ export type IntegrationsUpdateProps =
 			integrationId: string;
 			channel: string;
 			scriptEnabled: boolean;
-			scriptEngine: 'isolated-vm' | 'vm2';
+			scriptEngine: 'isolated-vm';
 			overrideDestinationChannelEnabled?: boolean;
 			script?: string;
 			name: string;
@@ -33,7 +32,7 @@ export type IntegrationsUpdateProps =
 			token?: string;
 
 			scriptEnabled: boolean;
-			scriptEngine: 'isolated-vm' | 'vm2';
+			scriptEngine: 'isolated-vm';
 			script?: string;
 			runOnEdits?: boolean;
 

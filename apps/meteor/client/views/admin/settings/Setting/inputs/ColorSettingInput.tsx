@@ -1,8 +1,9 @@
+import type { SettingEditor } from '@rocket.chat/core-typings';
 import { FieldLabel, FieldRow, FieldHint, Flex, InputBox, Margins, TextInput, Select, Field } from '@rocket.chat/fuselage';
 import type { TranslationKey } from '@rocket.chat/ui-contexts';
-import { useTranslation } from '@rocket.chat/ui-contexts';
-import type { ReactElement } from 'react';
-import React, { useCallback } from 'react';
+import type { ChangeEvent, Key, ReactElement } from 'react';
+import { useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import ResetSettingButton from '../ResetSettingButton';
 import type { SettingInputProps } from './types';
@@ -17,6 +18,7 @@ function ColorSettingInput({
 	_id,
 	label,
 	value,
+	hint,
 	editor,
 	allowedTypes = [],
 	placeholder,
@@ -29,18 +31,18 @@ function ColorSettingInput({
 	onChangeEditor,
 	onResetButtonClick,
 }: ColorSettingInputProps): ReactElement {
-	const t = useTranslation();
+	const { t } = useTranslation();
 
 	const handleChange = useCallback(
-		(event) => {
+		(event: ChangeEvent<HTMLInputElement>) => {
 			onChangeValue?.(event.currentTarget.value);
 		},
 		[onChangeValue],
 	);
 
 	const handleEditorTypeChange = useCallback(
-		(value) => {
-			onChangeEditor?.(value);
+		(value: Key) => {
+			onChangeEditor?.(value as SettingEditor);
 		},
 		[onChangeEditor],
 	);
@@ -51,7 +53,7 @@ function ColorSettingInput({
 				<FieldLabel htmlFor={_id} title={_id} required={required}>
 					{label}
 				</FieldLabel>
-				{hasResetButton && <ResetSettingButton data-qa-reset-setting-id={_id} onClick={onResetButtonClick} />}
+				{hasResetButton && <ResetSettingButton onClick={onResetButtonClick} />}
 			</FieldRow>
 			<Margins inline={4}>
 				<FieldRow>
@@ -59,7 +61,6 @@ function ColorSettingInput({
 						<Flex.Item grow={2}>
 							{editor === 'color' && (
 								<InputBox
-									data-qa-setting-id={_id}
 									type='color'
 									id={_id}
 									value={value}
@@ -72,7 +73,6 @@ function ColorSettingInput({
 							)}
 							{editor === 'expression' && (
 								<TextInput
-									data-qa-setting-id={_id}
 									id={_id}
 									value={value}
 									placeholder={placeholder}
@@ -84,7 +84,6 @@ function ColorSettingInput({
 							)}
 						</Flex.Item>
 						<Select
-							data-qa-setting-id={`${_id}_editor`}
 							type='color'
 							id={`${_id}_editor`}
 							value={editor}
@@ -98,6 +97,7 @@ function ColorSettingInput({
 				</FieldRow>
 			</Margins>
 			<FieldHint>Variable name: {_id.replace(/theme-color-/, '@')}</FieldHint>
+			{hint && <FieldHint>{hint}</FieldHint>}
 		</Field>
 	);
 }

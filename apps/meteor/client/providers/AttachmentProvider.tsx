@@ -2,7 +2,7 @@ import { usePrefersReducedData } from '@rocket.chat/fuselage-hooks';
 import type { AttachmentContextValue } from '@rocket.chat/ui-contexts';
 import { AttachmentContext, useLayout, useUserPreference } from '@rocket.chat/ui-contexts';
 import type { ReactNode } from 'react';
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 
 import { getURL } from '../../app/utils/client';
 
@@ -32,7 +32,7 @@ const AttachmentProvider = ({ children, width = 360, height = 360 }: AttachmentP
 		[collapsedByDefault, reducedData, autoLoadEmbedMedias, saveMobileBandwidth, isMobile, width, height],
 	);
 
-	return <AttachmentContext.Provider children={children} value={contextValue} />;
+	return <AttachmentContext.Provider value={contextValue}>{children}</AttachmentContext.Provider>;
 };
 
 export default AttachmentProvider;

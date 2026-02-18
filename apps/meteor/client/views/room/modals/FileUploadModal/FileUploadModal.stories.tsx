@@ -1,10 +1,8 @@
-import type { ComponentMeta, ComponentStory } from '@storybook/react';
-import React from 'react';
+import type { Meta, StoryFn } from '@storybook/react';
 
 import FileUploadModal from '.';
 
 export default {
-	title: 'Room/Modals/FileUploadModal',
 	component: FileUploadModal,
 	parameters: {
 		layout: 'fullscreen',
@@ -13,10 +11,8 @@ export default {
 	args: {
 		file: new File(['The lazy brown fox jumped over the lazy brown fox.'], 'test.txt', { type: 'text/plain' }),
 		fileName: 'test.txt',
-		fileDescription: '',
-		invalidContentType: false,
 	},
-} as ComponentMeta<typeof FileUploadModal>;
+} satisfies Meta<typeof FileUploadModal>;
 
-export const Default: ComponentStory<typeof FileUploadModal> = (args) => <FileUploadModal {...args} />;
+export const Default: StoryFn<typeof FileUploadModal> = (args) => <FileUploadModal {...args} />;
 Default.storyName = 'FileUploadModal';

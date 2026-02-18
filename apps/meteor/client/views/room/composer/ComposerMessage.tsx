@@ -1,13 +1,12 @@
 import type { IMessage, ISubscription } from '@rocket.chat/core-typings';
 import { useToastMessageDispatch } from '@rocket.chat/ui-contexts';
 import type { ReactElement, ReactNode } from 'react';
-import React, { memo, useCallback, useMemo } from 'react';
+import { memo, useMemo, useSyncExternalStore } from 'react';
 
+import ComposerSkeleton from './ComposerSkeleton';
 import { LegacyRoomManager } from '../../../../app/ui-utils/client';
-import { useReactiveValue } from '../../../hooks/useReactiveValue';
 import { useChat } from '../contexts/ChatContext';
 import { useRoom } from '../contexts/RoomContext';
-import ComposerSkeleton from './ComposerSkeleton';
 import MessageBox from './messageBox/MessageBox';
 
 export type ComposerMessageProps = {
@@ -21,7 +20,7 @@ export type ComposerMessageProps = {
 	onSend?: () => void;
 	onNavigateToNextMessage?: () => void;
 	onNavigateToPreviousMessage?: () => void;
-	onUploadFiles?: (files: readonly File[]) => void;
+	onClickSelectAll?: () => void;
 };
 
 const ComposerMessage = ({ tmid, onSend, ...props }: ComposerMessageProps): ReactElement => {
@@ -58,6 +57,7 @@ const ComposerMessage = ({ tmid, onSend, ...props }: ComposerMessageProps): Reac
 						tshow,
 						previewUrls,
 						isSlashCommandAllowed,
+						tmid,
 					});
 					if (newMessageSent) onSend?.();
 				} catch (error) {
@@ -73,16 +73,15 @@ const ComposerMessage = ({ tmid, onSend, ...props }: ComposerMessageProps): Reac
 			},
 			onNavigateToPreviousMessage: () => chat?.messageEditing.toPreviousMessage(),
 			onNavigateToNextMessage: () => chat?.messageEditing.toNextMessage(),
-			onUploadFiles: (files: readonly File[]) => {
-				return chat?.flows.uploadFiles(files);
-			},
 		}),
-		[chat?.data, chat?.flows, chat?.action, chat?.composer?.text, chat?.messageEditing, dispatchToastMessage, onSend],
+		[chat?.data, chat?.action, chat?.flows, chat?.composer?.text, chat?.messageEditing, dispatchToastMessage, tmid, onSend],
 	);
 
-	const publicationReady = useReactiveValue(
-		useCallback(() => LegacyRoomManager.getOpenedRoomByRid(room._id)?.streamActive ?? false, [room._id]),
-	);
+	const { subscribe, getSnapshotValue } = useMemo(() => {
+		return LegacyRoomManager.listenRoomPropsByRid(room._id, 'streamActive');
+	}, [room._id]);
+
+	const publicationReady = useSyncExternalStore(subscribe, getSnapshotValue);
 
 	if (!publicationReady) {
 		return <ComposerSkeleton />;

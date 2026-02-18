@@ -1,5 +1,8 @@
+import Stream from 'stream';
+
 import { asyncLocalStorage } from '@rocket.chat/core-services';
-import type { IBroker, IBrokerNode, IServiceMetrics, IServiceClass, EventSignatures } from '@rocket.chat/core-services';
+import type { CallingOptions, IBroker, IBrokerNode, IServiceMetrics, IServiceClass, EventSignatures } from '@rocket.chat/core-services';
+import { injectCurrentContext, tracerSpan } from '@rocket.chat/tracing';
 import type { ServiceBroker, Context, ServiceSchema } from 'moleculer';
 
 import { EnterpriseCheck } from './EnterpriseCheck';
@@ -16,16 +19,12 @@ const lifecycle: { [k: string]: string } = {
 	stopped: 'stopped',
 };
 
-const {
-	WAIT_FOR_SERVICES_TIMEOUT = '10000', // 10 seconds
-} = process.env;
-
-const waitForServicesTimeout = parseInt(WAIT_FOR_SERVICES_TIMEOUT, 10) || 10000;
-
 export class NetworkBroker implements IBroker {
 	private broker: ServiceBroker;
 
 	private started: Promise<boolean> = Promise.resolve(false);
+
+	private defaultDependencies = ['settings', 'license'];
 
 	metrics: IServiceMetrics;
 
@@ -35,44 +34,38 @@ export class NetworkBroker implements IBroker {
 		this.metrics = broker.metrics;
 	}
 
-	async call(method: string, data: any): Promise<any> {
+	async call(method: string, data: any, options?: CallingOptions): Promise<any> {
 		if (!(await this.started)) {
 			return;
 		}
 
 		const context = asyncLocalStorage.getStore();
 
+		const stream = data?.[0]?.streamParam;
+		const isStreamingCall = !!stream;
+
 		if (context?.ctx?.call) {
-			return context.ctx.call(method, data);
+			return context.ctx.call(method, isStreamingCall ? stream : data, {
+				...options,
+				...(isStreamingCall && { meta: { ...((options as any)?.meta || {}), details: data[0].details } }),
+			});
 		}
 
 		const services: { name: string }[] = await this.broker.call('$node.services', {
 			onlyAvailable: true,
 		});
+
 		if (!services.find((service) => service.name === method.split('.')[0])) {
 			return new Error('method-not-available');
 		}
-		return this.broker.call(method, data);
-	}
 
-	async waitAndCall(method: string, data: any): Promise<any> {
-		if (!(await this.started)) {
-			return;
-		}
-
-		try {
-			await this.broker.waitForServices(method.split('.')[0], waitForServicesTimeout);
-		} catch (err) {
-			console.error(err);
-			throw new Error('Dependent services not available');
-		}
-
-		const context = asyncLocalStorage.getStore();
-		if (context?.ctx?.call) {
-			return context.ctx.call(method, data);
-		}
-
-		return this.broker.call(method, data);
+		return this.broker.call(method, isStreamingCall ? stream : data, {
+			...options,
+			meta: {
+				optl: injectCurrentContext(),
+				...(isStreamingCall && { details: data?.[0]?.details }),
+			},
+		});
 	}
 
 	async destroyService(instance: IServiceClass): Promise<void> {
@@ -84,7 +77,7 @@ export class NetworkBroker implements IBroker {
 		instance.removeAllListeners();
 	}
 
-	createService(instance: IServiceClass, serviceDependencies?: string[]): void {
+	createService(instance: IServiceClass, serviceDependencies: string[] = []): void {
 		const methods = (
 			instance.constructor?.name === 'Object'
 				? Object.getOwnPropertyNames(instance)
@@ -103,22 +96,24 @@ export class NetworkBroker implements IBroker {
 			return;
 		}
 
-		// Allow services to depend on other services too
-		const dependencies = name !== 'license' ? { dependencies: ['license', ...(serviceDependencies || [])] } : {};
+		const dependencies = [...serviceDependencies, ...(name === 'settings' ? [] : this.defaultDependencies)].filter(
+			(dependency) => dependency !== name,
+		);
+
 		const service: ServiceSchema = {
 			name,
 			actions: {},
 			mixins: !instance.isInternal() ? [EnterpriseCheck] : [],
-			...dependencies,
+			...(dependencies.length ? { dependencies } : {}),
 			events: instanceEvents.reduce<Record<string, (ctx: Context) => void>>((map, { eventName }) => {
 				map[eventName] = /^\$/.test(eventName)
 					? (ctx: Context): void => {
 							// internal events params are not an array
 							instance.emit(eventName, ctx.params as Parameters<EventSignatures[typeof eventName]>);
-					  }
+						}
 					: (ctx: Context): void => {
 							instance.emit(eventName, ...(ctx.params as Parameters<EventSignatures[typeof eventName]>));
-					  };
+						};
 				return map;
 			}, {}),
 		};
@@ -148,16 +143,26 @@ export class NetworkBroker implements IBroker {
 				continue;
 			}
 
-			service.actions[method] = async (ctx: Context<[]>): Promise<any> => {
-				return asyncLocalStorage.run(
-					{
-						id: ctx.id,
-						nodeID: ctx.nodeID,
-						requestID: ctx.requestID,
-						broker: this,
-						ctx,
+			service.actions[method] = async (ctx: Context<[], { optl?: unknown; details?: unknown }>): Promise<any> => {
+				const isStreamingCall = Stream.isReadable(ctx.params as any);
+				const params = isStreamingCall ? [{ streamParam: ctx.params, details: ctx.meta?.details }] : ctx.params;
+
+				return tracerSpan(
+					`action ${name}:${method}${isStreamingCall ? ' (streaming)' : ''}`,
+					{},
+					() => {
+						return asyncLocalStorage.run(
+							{
+								id: ctx.id,
+								nodeID: ctx.nodeID,
+								requestID: ctx.requestID,
+								broker: this,
+								ctx,
+							},
+							() => serviceInstance[method](...params),
+						);
 					},
-					() => serviceInstance[method](...ctx.params),
+					ctx.meta?.optl,
 				);
 			};
 		}

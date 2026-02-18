@@ -1,8 +1,7 @@
-import { Field, FieldLabel, FieldRow, Select } from '@rocket.chat/fuselage';
+import { Field, FieldHint, FieldLabel, FieldRow, Select } from '@rocket.chat/fuselage';
 import type { TranslationKey } from '@rocket.chat/ui-contexts';
-import { useTranslation } from '@rocket.chat/ui-contexts';
 import type { ReactElement } from 'react';
-import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 import ResetSettingButton from '../ResetSettingButton';
 import type { SettingInputProps } from './types';
@@ -15,6 +14,7 @@ function SelectSettingInput({
 	_id,
 	label,
 	value,
+	hint,
 	placeholder,
 	readonly,
 	autocomplete,
@@ -25,7 +25,7 @@ function SelectSettingInput({
 	onChangeValue,
 	onResetButtonClick,
 }: SelectSettingInputProps): ReactElement {
-	const t = useTranslation();
+	const { t } = useTranslation();
 
 	const handleChange = (value: string): void => {
 		onChangeValue?.(value);
@@ -37,11 +37,10 @@ function SelectSettingInput({
 				<FieldLabel htmlFor={_id} title={_id} required={required}>
 					{label}
 				</FieldLabel>
-				{hasResetButton && <ResetSettingButton data-qa-reset-setting-id={_id} onClick={onResetButtonClick} />}
+				{hasResetButton && <ResetSettingButton onClick={onResetButtonClick} />}
 			</FieldRow>
 			<FieldRow>
 				<Select
-					data-qa-setting-id={_id}
 					id={_id}
 					value={value}
 					placeholder={placeholder}
@@ -52,6 +51,7 @@ function SelectSettingInput({
 					options={values.map(({ key, i18nLabel }) => [key, t(i18nLabel)])}
 				/>
 			</FieldRow>
+			{hint && <FieldHint>{hint}</FieldHint>}
 		</Field>
 	);
 }

@@ -1,9 +1,6 @@
 import type { CloudRegistrationIntentData, CloudConfirmationPollData, CloudRegistrationStatus } from '@rocket.chat/core-typings';
-import Ajv from 'ajv';
 
-const ajv = new Ajv({
-	coerceTypes: true,
-});
+import { ajv } from './Ajv';
 
 type CloudManualRegister = {
 	cloudBlob: string;
@@ -53,14 +50,10 @@ const CloudConfirmationPollSchema = {
 	properties: {
 		deviceCode: {
 			type: 'string',
-		},
-		resend: {
-			type: 'string',
-			nullable: true,
+			minLength: 1,
 		},
 	},
 	required: ['deviceCode'],
-	optionalProperties: ['resend'],
 	additionalProperties: false,
 };
 

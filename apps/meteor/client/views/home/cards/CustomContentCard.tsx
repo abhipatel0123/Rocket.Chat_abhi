@@ -1,22 +1,22 @@
 import { Box, Button, Card, CardBody, CardControls, CardHeader, Icon, Tag } from '@rocket.chat/fuselage';
-import { useRole, useSettingSetValue, useSetting, useToastMessageDispatch, useTranslation, useRouter } from '@rocket.chat/ui-contexts';
+import { useRole, useSettingSetValue, useSetting, useToastMessageDispatch, useRouter } from '@rocket.chat/ui-contexts';
 import type { ComponentProps, ReactElement } from 'react';
-import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { useIsEnterprise } from '../../../hooks/useIsEnterprise';
 import CustomHomepageContent from '../CustomHomePageContent';
 
 const CustomContentCard = (props: Omit<ComponentProps<typeof Card>, 'type'>): ReactElement | null => {
-	const t = useTranslation();
+	const { t } = useTranslation();
 	const dispatchToastMessage = useToastMessageDispatch();
 	const router = useRouter();
 
 	const { data } = useIsEnterprise();
 	const isAdmin = useRole('admin');
-	const customContentBody = useSetting<string>('Layout_Home_Body');
+	const customContentBody = useSetting('Layout_Home_Body', '');
 	const isCustomContentBodyEmpty = customContentBody === '';
-	const isCustomContentVisible = useSetting<boolean>('Layout_Home_Custom_Block_Visible');
-	const isCustomContentOnly = useSetting<boolean>('Layout_Custom_Body_Only');
+	const isCustomContentVisible = useSetting('Layout_Home_Custom_Block_Visible', false);
+	const isCustomContentOnly = useSetting('Layout_Custom_Body_Only', false);
 
 	const setCustomContentVisible = useSettingSetValue('Layout_Home_Custom_Block_Visible');
 	const setCustomContentOnly = useSettingSetValue('Layout_Custom_Body_Only');
@@ -51,7 +51,7 @@ const CustomContentCard = (props: Omit<ComponentProps<typeof Card>, 'type'>): Re
 
 	if (isAdmin) {
 		return (
-			<Card data-qa-id='homepage-custom-card' {...props}>
+			<Card role='region' aria-label={t('Custom_content', 'Custom content')} {...props}>
 				<CardHeader>
 					<Tag>
 						<Icon mie={4} name={willNotShowCustomContent ? 'eye-off' : 'eye'} size='x12' />

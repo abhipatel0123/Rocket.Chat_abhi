@@ -1,6 +1,5 @@
 import { Box } from '@rocket.chat/fuselage';
 import type { ReactNode } from 'react';
-import React from 'react';
 
 import Attachment from './Attachment';
 
@@ -17,8 +16,9 @@ const AttachmentBlock = ({ pre, color = 'annotation', children }: AttachmentBloc
 			borderInlineStartStyle='solid'
 			borderInlineStartWidth='default'
 			borderInlineStartColor={color}
-			children={children}
-		/>
+		>
+			{children}
+		</Box>
 	</Attachment>
 );
 

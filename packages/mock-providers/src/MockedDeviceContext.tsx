@@ -1,6 +1,15 @@
 import type { DeviceContextValue } from '@rocket.chat/ui-contexts';
 import { DeviceContext } from '@rocket.chat/ui-contexts';
-import React from 'react';
+import type { ReactNode } from 'react';
+
+const mockPermissionStatus: PermissionStatus = {
+	state: 'granted',
+	name: 'microphone',
+	onchange: () => undefined,
+	addEventListener: () => undefined,
+	removeEventListener: () => undefined,
+	dispatchEvent: () => true,
+};
 
 const mockDeviceContextValue: DeviceContextValue = {
 	enabled: true,
@@ -8,12 +17,13 @@ const mockDeviceContextValue: DeviceContextValue = {
 	selectedAudioInputDevice: undefined,
 	availableAudioOutputDevices: [],
 	availableAudioInputDevices: [],
+	permissionStatus: mockPermissionStatus,
 	setAudioOutputDevice: () => undefined,
 	setAudioInputDevice: () => undefined,
 };
 
 type MockedDeviceContextProps = Partial<DeviceContextValue> & {
-	children: React.ReactNode;
+	children: ReactNode;
 };
 
 export const MockedDeviceContext = ({ children, ...props }: MockedDeviceContextProps) => {

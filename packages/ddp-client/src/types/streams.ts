@@ -9,7 +9,6 @@ import type {
 	IEmoji,
 	ICustomSound,
 	INotificationDesktop,
-	VoipEventDataSignature,
 	IUser,
 	IOmnichannelRoom,
 	VideoConference,
@@ -24,7 +23,10 @@ import type {
 	LicenseLimitKind,
 	ICustomUserStatus,
 	IWebdavAccount,
+	MessageAttachment,
+	ISession,
 } from '@rocket.chat/core-typings';
+import type { ServerMediaSignal } from '@rocket.chat/media-signaling';
 import type * as UiKit from '@rocket.chat/ui-kit';
 
 type ClientAction = 'inserted' | 'updated' | 'removed' | 'changed';
@@ -56,7 +58,15 @@ export interface StreamerEvents {
 					users: string[];
 					ids?: string[]; // message ids have priority over ts
 					showDeletedStatus?: boolean;
-				},
+				} & (
+					| {
+							filesOnly: true;
+							replaceFileAttachmentsWith?: MessageAttachment;
+					  }
+					| {
+							filesOnly?: false;
+					  }
+				),
 			];
 		},
 		{ key: `${string}/deleteMessage`; args: [{ _id: IMessage['_id'] }] },
@@ -64,7 +74,6 @@ export interface StreamerEvents {
 		{ key: `${string}/videoconf`; args: [id: string] },
 		{ key: `${string}/messagesRead`; args: [{ until: Date; tmid?: string }] },
 		{ key: `${string}/messagesImported`; args: [null] },
-		{ key: `${string}/webrtc`; args: unknown[] },
 		/* @deprecated over videoconf*/
 		// { key: `${string}/${string}`; args: [id: string] },
 	];
@@ -142,6 +151,7 @@ export interface StreamerEvents {
 							| 'ignored'
 							| 'E2EKey'
 							| 'E2ESuggestedKey'
+							| 'oldRoomKeys'
 							| 'tunread'
 							| 'tunreadGroup'
 							| 'tunreadUser'
@@ -155,34 +165,23 @@ export interface StreamerEvents {
 		},
 
 		{ key: `${string}/message`; args: [IMessage] },
-		{ key: `${string}/force_logout`; args: [] },
+		{ key: `${string}/force_logout`; args: [ISession['sessionId'] | undefined] },
 		{
 			key: `${string}/webdav`;
 			args: [{ type: 'changed'; account: Partial<IWebdavAccount> } | { type: 'removed'; account: { _id: IWebdavAccount['_id'] } }];
 		},
 		{ key: `${string}/e2ekeyRequest`; args: [string, string] },
 		{ key: `${string}/notification`; args: [INotificationDesktop] },
-		{ key: `${string}/voip.events`; args: [VoipEventDataSignature] },
 		{ key: `${string}/call.hangup`; args: [{ roomId: string }] },
 		{ key: `${string}/uiInteraction`; args: [UiKit.ServerInteraction] },
 		{
 			key: `${string}/video-conference`;
 			args: [{ action: string; params: { callId: VideoConference['_id']; uid: IUser['_id']; rid: IRoom['_id'] } }];
 		},
+		{ key: `${string}/media-signal`; args: [ServerMediaSignal] },
 		{ key: `${string}/userData`; args: [IUserDataEvent] },
 		{ key: `${string}/updateInvites`; args: [unknown] },
 		{ key: `${string}/departmentAgentData`; args: [unknown] },
-		{ key: `${string}/webrtc`; args: unknown[] },
-		{
-			key: `${string}/otr`;
-			args: [
-				'handshake' | 'acknowledge' | 'deny' | 'end',
-				{
-					roomId: IRoom['_id'];
-					userId: IUser['_id'];
-				},
-			];
-		},
 		{ key: `${string}/calendar`; args: [ICalendarNotification] },
 		{ key: `${string}/banners`; args: [IBanner] },
 	];
@@ -208,18 +207,6 @@ export interface StreamerEvents {
 		{ key: 'updateEmojiCustom'; args: [{ emojiData: IEmoji }] },
 		/* @deprecated */
 		{ key: 'new-banner'; args: [{ bannerId: string }] },
-
-		{
-			key: `${string}/otr`;
-			args: [
-				'handshake' | 'acknowledge' | 'deny' | 'end',
-				{
-					roomId: IRoom['_id'];
-					userId: IUser['_id'];
-				},
-			];
-		},
-		{ key: `${string}/webrtc`; args: [unknown] },
 
 		{ key: 'banner-changed'; args: [{ bannerId: string }] },
 		{
@@ -269,11 +256,8 @@ export interface StreamerEvents {
 			args: [{ username: IUser['username']; etag: IUser['avatarETag'] } | { rid: IRoom['_id']; etag: IRoom['avatarETag'] }];
 		},
 
-		{ key: 'voip.statuschanged'; args: [boolean] },
 		{ key: 'omnichannel.priority-changed'; args: [{ id: string; clientAction: ClientAction; name?: string }] },
 	];
-
-	'stdout': [{ key: 'stdout'; args: [{ id: string; string: string; ts: Date }] }];
 
 	'room-data': [{ key: string; args: [IOmnichannelRoom | Pick<IOmnichannelRoom, '_id'>] }];
 
@@ -281,17 +265,6 @@ export interface StreamerEvents {
 		{
 			key: `${string}/video-conference`;
 			args: [{ action: string; params: { callId: VideoConference['_id']; uid: IUser['_id']; rid: IRoom['_id'] } }];
-		},
-		{ key: `${string}/webrtc`; args: unknown[] },
-		{
-			key: `${string}/otr`;
-			args: [
-				'handshake' | 'acknowledge' | 'deny' | 'end',
-				{
-					roomId: IRoom['_id'];
-					userId: IUser['_id'];
-				},
-			];
 		},
 		{ key: `${string}/userData`; args: unknown[] },
 	];
@@ -371,6 +344,14 @@ export interface StreamerEvents {
 		},
 		{
 			key: `department/${string}`;
+			args: [
+				{
+					type: 'added' | 'removed' | 'changed';
+				} & ILivechatInquiryRecord,
+			];
+		},
+		{
+			key: `agent/${string}`;
 			args: [
 				{
 					type: 'added' | 'removed' | 'changed';
@@ -490,18 +471,14 @@ export type StreamKeys<S extends StreamNames> = StreamerEvents[S][number]['key']
 
 export type StreamerConfigs<N extends StreamNames> = StreamerEvents[N][number];
 
-export type StreamerConfig<N extends StreamNames, K extends StreamKeys<N>> = StreamerConfigs<N> extends infer U
-	? U extends any
-		? { key: K; args: any } extends U
-			? U
-			: never
-		: never
-	: never;
+export type StreamerConfig<N extends StreamNames, K extends StreamKeys<N>> =
+	StreamerConfigs<N> extends infer U ? (U extends any ? ({ key: K; args: any } extends U ? U : never) : never) : never;
 
-export type StreamerCallbackArgs<N extends StreamNames, K extends StreamKeys<N>> = StreamerConfig<N, K> extends {
-	args: any;
-}
-	? StreamerConfig<N, K>['args']
-	: never;
+export type StreamerCallbackArgs<N extends StreamNames, K extends StreamKeys<N>> =
+	StreamerConfig<N, K> extends {
+		args: any;
+	}
+		? StreamerConfig<N, K>['args']
+		: never;
 
 export type StreamerCallback<N extends StreamNames, K extends StreamKeys<N>> = (...args: StreamerCallbackArgs<N, K>) => void;

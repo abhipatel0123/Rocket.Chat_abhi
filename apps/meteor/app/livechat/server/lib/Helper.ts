@@ -13,6 +13,10 @@ import type {
 	TransferByData,
 	ILivechatAgent,
 	ILivechatDepartment,
+	IOmnichannelRoomInfo,
+	IOmnichannelInquiryExtraData,
+	IOmnichannelRoomExtraData,
+	ILivechatContact,
 } from '@rocket.chat/core-typings';
 import { LivechatInquiryStatus, OmnichannelSourceType, DEFAULT_SLA_CONFIG, UserStatus } from '@rocket.chat/core-typings';
 import { LivechatPriorityWeight } from '@rocket.chat/core-typings/src/ILivechatPriority';
@@ -24,15 +28,23 @@ import {
 	LivechatRooms,
 	LivechatDepartment,
 	Subscriptions,
-	Rooms,
 	Users,
+	LivechatContacts,
 } from '@rocket.chat/models';
+import { removeEmpty, validateEmail as validatorFunc } from '@rocket.chat/tools';
 import { Match, check } from 'meteor/check';
 import { Meteor } from 'meteor/meteor';
+import type { ClientSession } from 'mongodb';
 import { ObjectId } from 'mongodb';
 
-import { callbacks } from '../../../../lib/callbacks';
-import { validateEmail as validatorFunc } from '../../../../lib/emailValidator';
+import { queueInquiry, saveQueueInquiry } from './QueueManager';
+import { RoutingManager } from './RoutingManager';
+import { isVerifiedChannelInSource } from './contacts/isVerifiedChannelInSource';
+import { migrateVisitorIfMissingContact } from './contacts/migrateVisitorIfMissingContact';
+import { afterRoomQueued, beforeNewRoom } from './hooks';
+import { checkOnlineAgents, getOnlineAgents } from './service-status';
+import { saveTransferHistory } from './transfer';
+import { callbacks } from '../../../../server/lib/callbacks';
 import { i18n } from '../../../../server/lib/i18n';
 import { hasRoleAsync } from '../../../authorization/server/functions/hasRole';
 import { sendNotification } from '../../../lib/server';
@@ -42,11 +54,10 @@ import {
 	notifyOnSubscriptionChangedById,
 	notifyOnSubscriptionChangedByRoomId,
 	notifyOnSubscriptionChanged,
+	notifyOnRoomChangedById,
+	notifyOnLivechatInquiryChangedByRoom,
 } from '../../../lib/server/lib/notifyListener';
 import { settings } from '../../../settings/server';
-import { Livechat as LivechatTyped } from './LivechatTyped';
-import { queueInquiry, saveQueueInquiry } from './QueueManager';
-import { RoutingManager } from './RoutingManager';
 
 const logger = new Logger('LivechatHelper');
 export const allowAgentSkipQueue = (agent: SelectedAgent) => {
@@ -59,21 +70,13 @@ export const allowAgentSkipQueue = (agent: SelectedAgent) => {
 
 	return hasRoleAsync(agent.agentId, 'bot');
 };
-export const createLivechatRoom = async <
-	E extends Record<string, unknown> & {
-		sla?: string;
-		customFields?: Record<string, unknown>;
-		source?: OmnichannelSourceType;
-	},
->(
+export const prepareLivechatRoom = async (
 	rid: string,
-	name: string,
 	guest: ILivechatVisitor,
-	roomInfo: Partial<IOmnichannelRoom> = {},
-	extraData?: E,
-) => {
+	roomInfo: IOmnichannelRoomInfo = { source: { type: OmnichannelSourceType.OTHER } },
+	extraData?: IOmnichannelRoomExtraData,
+): Promise<InsertionModel<IOmnichannelRoom>> => {
 	check(rid, String);
-	check(name, String);
 	check(
 		guest,
 		Match.ObjectIncluding({
@@ -84,23 +87,39 @@ export const createLivechatRoom = async <
 		}),
 	);
 
-	const extraRoomInfo = await callbacks.run('livechat.beforeRoom', roomInfo, extraData);
-	const { _id, username, token, department: departmentId, status = 'online', contactId } = guest;
+	const extraRoomInfo = await beforeNewRoom(roomInfo, extraData);
+	const { _id, username, token, department: departmentId, status = 'online' } = guest;
 	const newRoomAt = new Date();
+	const source = extraRoomInfo.source || roomInfo.source;
 
-	const { activity } = guest;
+	if (settings.get<string>('Livechat_Require_Contact_Verification') === 'always') {
+		await LivechatContacts.setChannelVerifiedStatus({ visitorId: _id, source }, false);
+	}
+
+	const contactId = await migrateVisitorIfMissingContact(_id, source);
+	const contact =
+		contactId &&
+		(await LivechatContacts.findOneEnabledById<Pick<ILivechatContact, '_id' | 'name' | 'channels' | 'activity'>>(contactId, {
+			projection: { name: 1, channels: 1, activity: 1 },
+		}));
+	if (!contact) {
+		throw new Error('error-invalid-contact');
+	}
+	const verified = Boolean(contact.channels.some((channel) => isVerifiedChannelInSource(channel, _id, source)));
+
+	const activity = guest.activity || contact.activity;
 	logger.debug({
-		msg: `Creating livechat room for visitor ${_id}`,
+		msg: 'Creating livechat room for visitor',
 		visitor: { _id, username, departmentId, status, activity },
 	});
 
 	// TODO: Solve `u` missing issue
-	const room: InsertionModel<IOmnichannelRoom> = {
+	return {
 		_id: rid,
 		msgs: 0,
 		usersCount: 1,
 		lm: newRoomAt,
-		fname: name,
+		fname: contact.name,
 		t: 'l' as const,
 		ts: newRoomAt,
 		departmentId,
@@ -109,12 +128,13 @@ export const createLivechatRoom = async <
 			username,
 			token,
 			status,
-			contactId,
 			...(activity?.length && { activity }),
 		},
+		contactId,
 		cl: false,
 		open: true,
 		waitingResponse: true,
+		verified,
 		// this should be overridden by extraRoomInfo when provided
 		// in case it's not provided, we'll use this "default" type
 		source: {
@@ -122,31 +142,30 @@ export const createLivechatRoom = async <
 			alias: 'unknown',
 		},
 		queuedAt: newRoomAt,
-		livechatData: undefined,
 		priorityWeight: LivechatPriorityWeight.NOT_SPECIFIED,
 		estimatedWaitingTimeQueue: DEFAULT_SLA_CONFIG.ESTIMATED_WAITING_TIME_QUEUE,
 		...extraRoomInfo,
 	} as InsertionModel<IOmnichannelRoom>;
+};
 
-	const result = await Rooms.findOneAndUpdate(
-		room,
+export const createLivechatRoom = async (room: InsertionModel<IOmnichannelRoom>, session: ClientSession) => {
+	const result = await LivechatRooms.findOneAndUpdate(
+		removeEmpty(room),
 		{
 			$set: {},
 		},
 		{
 			upsert: true,
 			returnDocument: 'after',
+			session,
 		},
 	);
 
-	if (!result.value) {
+	if (!result) {
 		throw new Error('Room not created');
 	}
 
-	await callbacks.run('livechat.newRoom', room);
-	await Message.saveSystemMessageAndNotifyUser('livechat-started', rid, '', { _id, username }, { groupable: false, token: guest.token });
-
-	return result.value as IOmnichannelRoom;
+	return result;
 };
 
 export const createLivechatInquiry = async ({
@@ -156,13 +175,15 @@ export const createLivechatInquiry = async ({
 	message,
 	initialStatus,
 	extraData,
+	session,
 }: {
 	rid: string;
 	name?: string;
 	guest?: Pick<ILivechatVisitor, '_id' | 'username' | 'status' | 'department' | 'name' | 'token' | 'activity'>;
 	message?: string;
 	initialStatus?: LivechatInquiryStatus;
-	extraData?: Pick<ILivechatInquiryRecord, 'source'>;
+	extraData?: IOmnichannelInquiryExtraData;
+	session?: ClientSession;
 }) => {
 	check(rid, String);
 	check(name, String);
@@ -179,17 +200,21 @@ export const createLivechatInquiry = async ({
 
 	const extraInquiryInfo = await callbacks.run('livechat.beforeInquiry', extraData);
 
-	const { _id, username, token, department, status = UserStatus.ONLINE, activity } = guest;
+	const { _id, username, token, department, status = UserStatus.ONLINE } = guest;
+	const inquirySource = extraData?.source || { type: OmnichannelSourceType.OTHER };
+	const activity =
+		guest.activity ||
+		(await LivechatContacts.findOneByVisitor({ visitorId: guest._id, source: inquirySource }, { projection: { activity: 1 } }))?.activity;
 
 	const ts = new Date();
 
 	logger.debug({
-		msg: `Creating livechat inquiry for visitor ${_id}`,
+		msg: 'Creating livechat inquiry for visitor',
 		visitor: { _id, username, department, status, activity },
 	});
 
 	const result = await LivechatInquiry.findOneAndUpdate(
-		{
+		removeEmpty({
 			rid,
 			name,
 			ts,
@@ -208,7 +233,7 @@ export const createLivechatInquiry = async ({
 			estimatedWaitingTimeQueue: DEFAULT_SLA_CONFIG.ESTIMATED_WAITING_TIME_QUEUE,
 
 			...extraInquiryInfo,
-		},
+		}),
 		{
 			$set: {
 				_id: new ObjectId().toHexString(),
@@ -217,15 +242,20 @@ export const createLivechatInquiry = async ({
 		{
 			upsert: true,
 			returnDocument: 'after',
+			session,
 		},
 	);
-	logger.debug(`Inquiry ${result} created for visitor ${_id}`);
+	logger.debug({
+		msg: 'Inquiry created for visitor',
+		inquiryId: result,
+		visitorId: _id,
+	});
 
-	if (!result.value) {
+	if (!result) {
 		throw new Error('Inquiry not created');
 	}
 
-	return result.value as ILivechatInquiryRecord;
+	return result;
 };
 
 export const createLivechatSubscription = async (
@@ -264,8 +294,6 @@ export const createLivechatSubscription = async (
 		rid,
 		name,
 		fname: name,
-		lowerCaseName: name.toLowerCase(),
-		lowerCaseFName: name.toLowerCase(),
 		alert: true,
 		open: true,
 		unread: 1,
@@ -333,7 +361,7 @@ export const parseAgentCustomFields = (customFields?: Record<string, any>) => {
 			const parseCustomFields = JSON.parse(accountCustomFields);
 			return Object.keys(parseCustomFields).filter((customFieldKey) => parseCustomFields[customFieldKey].sendToIntegrations === true);
 		} catch (error) {
-			logger.error(error);
+			logger.error({ msg: 'Error parsing agent custom fields', err: error });
 			return [];
 		}
 	};
@@ -382,7 +410,11 @@ export const dispatchInquiryQueued = async (inquiry: ILivechatInquiryRecord, age
 	if (!inquiry?._id) {
 		return;
 	}
-	logger.debug(`Notifying agents of new inquiry ${inquiry._id} queued`);
+	logger.debug({
+		msg: 'Notifying agents of queued inquiry',
+		inquiryId: inquiry._id,
+		agentId: agent?.agentId,
+	});
 
 	const { department, rid, v } = inquiry;
 	const room = await LivechatRooms.findOneById(rid);
@@ -390,7 +422,7 @@ export const dispatchInquiryQueued = async (inquiry: ILivechatInquiryRecord, age
 		return;
 	}
 
-	setImmediate(() => callbacks.run('livechat.chatQueued', room));
+	void afterRoomQueued(room);
 
 	if (RoutingManager.getConfig()?.autoAssignAgent) {
 		return;
@@ -403,13 +435,12 @@ export const dispatchInquiryQueued = async (inquiry: ILivechatInquiryRecord, age
 	await saveQueueInquiry(inquiry);
 
 	// Alert only the online agents of the queued request
-	const onlineAgents = await LivechatTyped.getOnlineAgents(department, agent);
+	const onlineAgents = await getOnlineAgents(department, agent);
 	if (!onlineAgents) {
-		logger.debug('Cannot notify agents of queued inquiry. No online agents found');
+		logger.debug({ msg: 'Cannot notify agents of queued inquiry. No online agents found' });
 		return;
 	}
 
-	logger.debug(`Notifying ${await onlineAgents.count()} agents of new inquiry`);
 	const notificationUserName = v && (v.name || v.username);
 
 	for await (const agent of onlineAgents) {
@@ -440,8 +471,8 @@ export const dispatchInquiryQueued = async (inquiry: ILivechatInquiryRecord, age
 			hasMentionToHere: false,
 			message: { _id: '', u: v, msg: '' },
 			// we should use server's language for this type of messages instead of user's
-			notificationMessage: i18n.t('User_started_a_new_conversation', { username: notificationUserName }, language),
-			room: Object.assign(room, { name: i18n.t('New_chat_in_queue', {}, language) }),
+			notificationMessage: i18n.t('User_started_a_new_conversation', { username: notificationUserName, lng: language }),
+			room: Object.assign(room, { name: i18n.t('New_chat_in_queue', { lng: language }) }),
 			mentionIds: [],
 		});
 	}
@@ -452,22 +483,32 @@ export const forwardRoomToAgent = async (room: IOmnichannelRoom, transferData: T
 		return false;
 	}
 
-	logger.debug(`Forwarding room ${room._id} to agent ${transferData.userId}`);
+	logger.debug({
+		msg: 'Forwarding room to agent',
+		roomId: room._id,
+		userId: transferData.userId,
+	});
 
 	const { userId: agentId, clientAction } = transferData;
 	if (!agentId) {
 		throw new Error('error-invalid-agent');
 	}
-	const user = await Users.findOneOnlineAgentById(agentId);
+	const user = await Users.findOneOnlineAgentById(agentId, settings.get<boolean>('Livechat_enabled_when_agent_idle'));
 	if (!user) {
-		logger.debug(`Agent ${agentId} is offline. Cannot forward`);
+		logger.debug({
+			msg: 'Agent is offline. Cannot forward',
+			agentId,
+		});
 		throw new Error('error-user-is-offline');
 	}
 
 	const { _id: rid, servedBy: oldServedBy } = room;
 	const inquiry = await LivechatInquiry.findOneByRoomId(rid, {});
 	if (!inquiry) {
-		logger.debug(`No inquiries found for room ${room._id}. Cannot forward`);
+		logger.debug({
+			msg: 'No inquiries found for room. Cannot forward',
+			roomId: room._id,
+		});
 		throw new Error('error-invalid-inquiry');
 	}
 
@@ -481,7 +522,11 @@ export const forwardRoomToAgent = async (room: IOmnichannelRoom, transferData: T
 	delete inquiry.department;
 	// There are some Enterprise features that may interrupt the forwarding process
 	// Due to that we need to check whether the agent has been changed or not
-	logger.debug(`Forwarding inquiry ${inquiry._id} to agent ${agent.agentId}`);
+	logger.debug({
+		msg: 'Forwarding inquiry to agent',
+		inquiryId: inquiry._id,
+		agentId: agent.agentId,
+	});
 	const roomTaken = await RoutingManager.takeInquiry(
 		inquiry,
 		agent,
@@ -491,11 +536,14 @@ export const forwardRoomToAgent = async (room: IOmnichannelRoom, transferData: T
 		room,
 	);
 	if (!roomTaken) {
-		logger.debug(`Cannot forward inquiry ${inquiry._id}`);
+		logger.debug({
+			msg: 'Cannot forward inquiry',
+			inquiryId: inquiry._id,
+		});
 		return false;
 	}
 
-	await LivechatTyped.saveTransferHistory(room, transferData);
+	await saveTransferHistory(room, transferData);
 
 	const { servedBy } = roomTaken;
 	if (servedBy) {
@@ -513,7 +561,11 @@ export const forwardRoomToAgent = async (room: IOmnichannelRoom, transferData: T
 		});
 	}
 
-	logger.debug(`Inquiry ${inquiry._id} taken by agent ${agent.agentId}`);
+	logger.debug({
+		msg: 'Inquiry taken by agent after forwarding',
+		inquiryId: inquiry._id,
+		agentId: agent.agentId,
+	});
 	await callbacks.run('livechat.afterForwardChatToAgent', { rid, servedBy, oldServedBy });
 	return true;
 };
@@ -533,6 +585,12 @@ export const updateChatDepartment = async ({
 		Subscriptions.changeDepartmentByRoomId(rid, newDepartmentId),
 	]);
 
+	if (responses[0].modifiedCount) {
+		void notifyOnRoomChangedById(rid);
+	}
+	if (responses[1].modifiedCount) {
+		void notifyOnLivechatInquiryChangedByRoom(rid);
+	}
 	if (responses[2].modifiedCount) {
 		void notifyOnSubscriptionChangedByRoomId(rid);
 	}
@@ -557,7 +615,11 @@ export const forwardRoomToDepartment = async (room: IOmnichannelRoom, guest: ILi
 	if (!room?.open) {
 		return false;
 	}
-	logger.debug(`Attempting to forward room ${room._id} to department ${transferData.departmentId}`);
+	logger.debug({
+		msg: 'Attempting to forward room to department',
+		roomId: room._id,
+		departmentId: transferData.departmentId,
+	});
 
 	await callbacks.run('livechat.beforeForwardRoomToDepartment', { room, transferData });
 	const { _id: rid, servedBy: oldServedBy, departmentId: oldDepartmentId } = room;
@@ -565,13 +627,19 @@ export const forwardRoomToDepartment = async (room: IOmnichannelRoom, guest: ILi
 
 	const inquiry = await LivechatInquiry.findOneByRoomId(rid, {});
 	if (!inquiry) {
-		logger.debug(`Cannot forward room ${room._id}. No inquiries found`);
+		logger.debug({
+			msg: 'Cannot forward room. No inquiries found',
+			roomId: room._id,
+		});
 		throw new Error('error-transferring-inquiry');
 	}
 
 	const { departmentId } = transferData;
 	if (!departmentId) {
-		logger.debug(`Cannot forward room ${room._id}. No departmentId provided`);
+		logger.debug({
+			msg: 'Cannot forward room. No departmentId provided',
+			roomId: room._id,
+		});
 		throw new Error('error-transferring-inquiry-no-department');
 	}
 	if (oldDepartmentId === departmentId) {
@@ -580,8 +648,13 @@ export const forwardRoomToDepartment = async (room: IOmnichannelRoom, guest: ILi
 
 	const { userId: agentId, clientAction } = transferData;
 	if (agentId) {
-		logger.debug(`Forwarding room ${room._id} to department ${departmentId} (to user ${agentId})`);
-		const user = await Users.findOneOnlineAgentById(agentId);
+		logger.debug({
+			msg: 'Forwarding room to department and user',
+			roomId: room._id,
+			departmentId,
+			agentId,
+		});
+		const user = await Users.findOneOnlineAgentById(agentId, settings.get<boolean>('Livechat_enabled_when_agent_idle'));
 		if (!user) {
 			throw new Error('error-user-is-offline');
 		}
@@ -605,14 +678,29 @@ export const forwardRoomToDepartment = async (room: IOmnichannelRoom, guest: ILi
 		},
 	});
 
+	// Cases:
+	// 1. Routing is manual
+	// 2. Server is out of macs
+	// 3. Department allows to forward when offline and department is offline
+	// 4. Department is online && waiting queue is enabled
+	const onlineAgents = await checkOnlineAgents(departmentId);
+	const isWaitingQueueEnabled = settings.get('Livechat_waiting_queue');
 	if (
 		!RoutingManager.getConfig()?.autoAssignAgent ||
 		!(await Omnichannel.isWithinMACLimit(room)) ||
-		(department?.allowReceiveForwardOffline && !(await LivechatTyped.checkOnlineAgents(departmentId)))
+		(department?.allowReceiveForwardOffline && !onlineAgents) ||
+		(isWaitingQueueEnabled && onlineAgents)
 	) {
-		logger.debug(`Room ${room._id} will be on department queue`);
-		await LivechatTyped.saveTransferHistory(room, transferData);
-		return RoutingManager.unassignAgent(inquiry, departmentId, true);
+		logger.debug({
+			msg: 'Room will be on department queue',
+			roomId: room._id,
+			departmentId,
+			departmentAllowOffline: department?.allowReceiveForwardOffline,
+			areAgentsOnline: onlineAgents,
+			isWaitingQueueEnabled,
+		});
+		await saveTransferHistory(room, transferData);
+		return RoutingManager.unassignAgent(inquiry, departmentId, true, agent);
 	}
 
 	// Fake the department to forward the inquiry - Case the forward process does not success
@@ -628,15 +716,23 @@ export const forwardRoomToDepartment = async (room: IOmnichannelRoom, guest: ILi
 		room,
 	);
 	if (!roomTaken) {
-		logger.debug(`Cannot forward room ${room._id}. Unable to delegate inquiry`);
+		logger.debug({
+			msg: 'Cannot forward room. Unable to delegate inquiry',
+			roomId: room._id,
+		});
 		return false;
 	}
 
 	const { servedBy, chatQueued } = roomTaken;
 	if (!chatQueued && oldServedBy && servedBy && oldServedBy._id === servedBy._id) {
 		if (!department?.fallbackForwardDepartment?.length) {
-			logger.debug(`Cannot forward room ${room._id}. Chat assigned to agent ${servedBy._id} (Previous was ${oldServedBy._id})`);
-			throw new Error('error-no-agents-online-in-department');
+			logger.debug({
+				msg: 'Cannot forward room. Chat assigned to agent instead',
+				roomId: room._id,
+				agentId: servedBy._id,
+				previousAgentId: oldServedBy._id,
+			});
+			throw new Error('error-no-agents-available-for-service-on-department');
 		}
 
 		if (!transferData.originalDepartmentName) {
@@ -646,7 +742,10 @@ export const forwardRoomToDepartment = async (room: IOmnichannelRoom, guest: ILi
 		const transferSuccess = !!(await callbacks.run('livechat:onTransferFailure', room, { guest, transferData, department }));
 		// On CE theres no callback so it will return the room
 		if (typeof transferSuccess !== 'boolean' || !transferSuccess) {
-			logger.debug(`Cannot forward room ${room._id}. Unable to delegate inquiry`);
+			logger.debug({
+				msg: 'Cannot forward room. Unable to delegate inquiry',
+				roomId: room._id,
+			});
 			return false;
 		}
 
@@ -671,7 +770,7 @@ export const forwardRoomToDepartment = async (room: IOmnichannelRoom, guest: ILi
 		);
 	}
 
-	await LivechatTyped.saveTransferHistory(room, transferData);
+	await saveTransferHistory(room, transferData);
 	if (oldServedBy) {
 		// if chat is queued then we don't ignore the new servedBy agent bcs at this
 		// point the chat is not assigned to him/her and it is still in the queue
@@ -681,18 +780,27 @@ export const forwardRoomToDepartment = async (room: IOmnichannelRoom, guest: ILi
 	await updateChatDepartment({ rid, newDepartmentId: departmentId, oldDepartmentId });
 
 	if (chatQueued) {
-		logger.debug(`Forwarding succesful. Marking inquiry ${inquiry._id} as ready`);
+		logger.debug({
+			msg: 'Forwarding successful. Marking inquiry as ready',
+			inquiryId: inquiry._id,
+		});
 		await LivechatInquiry.readyInquiry(inquiry._id);
 		await LivechatRooms.removeAgentByRoomId(rid);
 		await dispatchAgentDelegated(rid);
 		const newInquiry = await LivechatInquiry.findOneById(inquiry._id);
 		if (!newInquiry) {
-			logger.debug(`Inquiry ${inquiry._id} not found`);
+			logger.debug({
+				msg: 'Inquiry not found after forwarding',
+				inquiryId: inquiry._id,
+			});
 			throw new Error('error-invalid-inquiry');
 		}
 
 		await queueInquiry(newInquiry);
-		logger.debug(`Inquiry ${inquiry._id} queued succesfully`);
+		logger.debug({
+			msg: 'Inquiry queued successfully after forwarding',
+			inquiryId: inquiry._id,
+		});
 	}
 
 	return true;
@@ -728,7 +836,7 @@ const parseFromIntOrStr = (value: string | number) => {
 export const updateDepartmentAgents = async (
 	departmentId: string,
 	agents: {
-		upsert?: Pick<ILivechatDepartmentAgents, 'agentId' | 'count' | 'order'>[];
+		upsert?: (Pick<ILivechatDepartmentAgents, 'agentId'> & { count?: number; order?: number })[];
 		remove?: Pick<ILivechatDepartmentAgents, 'agentId'>[];
 	},
 	departmentEnabled: boolean,

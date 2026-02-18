@@ -1,11 +1,9 @@
 import { mockAppRoot } from '@rocket.chat/mock-providers';
 import { render, screen } from '@testing-library/react';
-import React from 'react';
 
-import { E2ERoomState } from '../../../../../app/e2e/client/E2ERoomState';
+import MessageBoxHint from './MessageBoxHint';
 import { useRoom } from '../../contexts/RoomContext';
 import { useE2EERoomState } from '../../hooks/useE2EERoomState';
-import MessageBoxHint from './MessageBoxHint';
 
 jest.mock('../../hooks/useE2EERoomState', () => ({
 	useE2EERoomState: jest.fn(),
@@ -24,13 +22,12 @@ const renderOptions = {
 			E2EE_Composer_Unencrypted_Message: "You're sending an unencrypted message",
 		})
 		.build(),
-	legacyRoot: true,
 };
 
 describe('MessageBoxHint', () => {
 	beforeEach(() => {
 		(useRoom as jest.Mock).mockReturnValue({ _id: 'roomId', ro: false });
-		(useE2EERoomState as jest.Mock).mockReturnValue(E2ERoomState.WAITING_KEYS);
+		(useE2EERoomState as jest.Mock).mockReturnValue('WAITING_KEYS');
 	});
 
 	describe('Editing message', () => {
@@ -83,14 +80,14 @@ describe('MessageBoxHint', () => {
 		});
 
 		it('does not renders hint text when E2ERoomState is READY', () => {
-			(useE2EERoomState as jest.Mock).mockReturnValue(E2ERoomState.READY);
+			(useE2EERoomState as jest.Mock).mockReturnValue('READY');
 
 			render(<MessageBoxHint e2eEnabled={true} unencryptedMessagesAllowed={true} />, renderOptions);
 			expect(screen.queryByText("You're sending an unencrypted message")).not.toBeInTheDocument();
 		});
 
 		it('does not renders hint text when E2ERoomState is DISABLED', () => {
-			(useE2EERoomState as jest.Mock).mockReturnValue(E2ERoomState.DISABLED);
+			(useE2EERoomState as jest.Mock).mockReturnValue('DISABLED');
 
 			render(<MessageBoxHint e2eEnabled={true} unencryptedMessagesAllowed={true} />, renderOptions);
 			expect(screen.queryByText("You're sending an unencrypted message")).not.toBeInTheDocument();

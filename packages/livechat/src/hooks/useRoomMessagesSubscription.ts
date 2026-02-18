@@ -1,6 +1,6 @@
 import type { IMessage } from '@rocket.chat/core-typings';
 import { useStream } from '@rocket.chat/ui-contexts';
-import { useEffect } from 'react';
+import { useEffect } from 'preact/hooks';
 
 import { onMessage } from '../lib/room';
 
@@ -12,7 +12,7 @@ export const useRoomMessagesSubscription = (rid: string, token: string) => {
 			return;
 		}
 		return stream(rid, (msg: IMessage) => {
-			onMessage(msg);
+			void onMessage(msg);
 		});
 	}, [rid, stream, token]);
 };

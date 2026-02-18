@@ -1,4 +1,4 @@
-import { useMutableCallback } from '@rocket.chat/fuselage-hooks';
+import { useEffectEvent } from '@rocket.chat/fuselage-hooks';
 import { useContext } from 'react';
 
 import { UserContext } from '../UserContext';
@@ -8,8 +8,8 @@ export const useLogout = (): (() => void) => {
 	const router = useRouter();
 	const { logout } = useContext(UserContext);
 
-	const handleLogout = useMutableCallback(() => {
-		logout();
+	const handleLogout = useEffectEvent(() => {
+		void logout();
 		router.navigate('/');
 	});
 

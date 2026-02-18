@@ -1,9 +1,10 @@
-import { Box, InputBox, Menu, Margins, Option } from '@rocket.chat/fuselage';
-import { useMutableCallback } from '@rocket.chat/fuselage-hooks';
-import { useTranslation } from '@rocket.chat/ui-contexts';
+import { Box, InputBox, Margins } from '@rocket.chat/fuselage';
+import { useEffectEvent } from '@rocket.chat/fuselage-hooks';
+import { GenericMenu } from '@rocket.chat/ui-client';
 import moment from 'moment';
-import type { ReactElement, ComponentProps, SetStateAction } from 'react';
-import React, { useMemo } from 'react';
+import type { ReactElement, ComponentProps, SetStateAction, FormEvent } from 'react';
+import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import type { DateRange } from '../../utils/dateRange';
 
@@ -117,16 +118,16 @@ type DateRangePickerProps = Omit<ComponentProps<typeof Box>, 'value' | 'onChange
 };
 
 const DateRangePicker = ({ value, onChange, ...props }: DateRangePickerProps): ReactElement => {
-	const dispatch = useMutableCallback((action: DateRangeAction): void => {
+	const dispatch = useEffectEvent((action: DateRangeAction): void => {
 		const newRange = dateRangeReducer(value ?? { start: undefined, end: undefined }, action);
 		onChange?.(newRange);
 	});
 
-	const handleChangeStart = useMutableCallback(({ currentTarget }) => {
+	const handleChangeStart = useEffectEvent(({ currentTarget }: FormEvent<HTMLInputElement>) => {
 		dispatch({ newStart: currentTarget.value });
 	});
 
-	const handleChangeEnd = useMutableCallback(({ currentTarget }) => {
+	const handleChangeEnd = useEffectEvent(({ currentTarget }: FormEvent<HTMLInputElement>) => {
 		dispatch({ newEnd: currentTarget.value });
 	});
 
@@ -138,49 +139,56 @@ const DateRangePicker = ({ value, onChange, ...props }: DateRangePickerProps): R
 	const minEndDate = startDate;
 	const maxEndDate = useMemo(() => formatToDateInput(new Date()), []);
 
-	const t = useTranslation();
+	const { t } = useTranslation();
 
 	const presets = useMemo(
-		() =>
-			({
-				today: {
-					label: t('Today'),
-					action: () => dispatch('today'),
-				},
-				yesterday: {
-					label: t('Yesterday'),
-					action: () => dispatch('yesterday'),
-				},
-				thisWeek: {
-					label: t('This_week'),
-					action: () => dispatch('this-week'),
-				},
-				previousWeek: {
-					label: t('Previous_week'),
-					action: () => dispatch('last-week'),
-				},
-				thisMonth: {
-					label: t('This_month'),
-					action: () => dispatch('this-month'),
-				},
-				lastMonth: {
-					label: t('Previous_month'),
-					action: () => dispatch('last-month'),
-				},
-			} as const),
+		() => [
+			{
+				id: 'today',
+				icon: 'history' as const,
+				content: t('Today'),
+				onClick: () => dispatch('today'),
+			},
+			{
+				id: 'yesterday',
+				icon: 'history' as const,
+				content: t('Yesterday'),
+				onClick: () => dispatch('yesterday'),
+			},
+			{
+				id: 'thisWeek',
+				icon: 'history' as const,
+				content: t('This_week'),
+				onClick: () => dispatch('this-week'),
+			},
+			{
+				id: 'previousWeek',
+				icon: 'history' as const,
+				content: t('Previous_week'),
+				onClick: () => dispatch('last-week'),
+			},
+			{
+				id: 'thisMonth',
+				icon: 'history' as const,
+				content: t('This_month'),
+				onClick: () => dispatch('this-month'),
+			},
+			{
+				id: 'lastMonth',
+				icon: 'history' as const,
+				content: t('Previous_month'),
+				onClick: () => dispatch('last-month'),
+			},
+		],
 		[dispatch, t],
 	);
 
 	return (
-		<Box marginInline={-4} {...props}>
+		<Box marginInline={-4} alignItems='center' {...props}>
 			<Margins inline={4}>
 				<InputBox type='date' value={startDate} max={maxStartDate} flexGrow={1} height={20} onChange={handleChangeStart} />
 				<InputBox type='date' min={minEndDate} value={endDate} max={maxEndDate} flexGrow={1} height={20} onChange={handleChangeEnd} />
-				<Menu
-					options={presets}
-					renderItem={(props: ComponentProps<typeof Option>) => <Option icon='history' {...props} />}
-					alignSelf='center'
-				/>
+				<GenericMenu title={t('Date_range_presets')} items={presets} small />
 			</Margins>
 		</Box>
 	);

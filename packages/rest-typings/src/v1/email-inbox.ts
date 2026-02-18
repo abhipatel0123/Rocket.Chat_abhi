@@ -1,12 +1,8 @@
 import type { IEmailInbox } from '@rocket.chat/core-typings';
-import Ajv from 'ajv';
 
+import { ajv } from './Ajv';
 import type { PaginatedRequest } from '../helpers/PaginatedRequest';
 import type { PaginatedResult } from '../helpers/PaginatedResult';
-
-const ajv = new Ajv({
-	coerceTypes: true,
-});
 
 type EmailInboxListProps = PaginatedRequest<{ query?: string }>;
 
@@ -41,9 +37,9 @@ type EmailInboxProps = {
 	name: string;
 	email: string;
 	active: boolean; // POST method
-	description: string;
-	senderInfo: string;
-	department: string;
+	description?: string;
+	senderInfo?: string;
+	department?: string;
 	smtp: {
 		password: string;
 		port: number;

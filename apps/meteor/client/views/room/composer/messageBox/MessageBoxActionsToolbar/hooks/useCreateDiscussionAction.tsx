@@ -2,7 +2,6 @@ import type { IRoom } from '@rocket.chat/core-typings';
 import { isRoomFederated } from '@rocket.chat/core-typings';
 import type { GenericMenuItemProps } from '@rocket.chat/ui-client';
 import { useTranslation, useSetting, usePermission, useSetModal } from '@rocket.chat/ui-contexts';
-import React from 'react';
 
 import CreateDiscussion from '../../../../../../components/CreateDiscussion';
 
@@ -15,9 +14,11 @@ export const useCreateDiscussionAction = (room?: IRoom): GenericMenuItemProps =>
 	}
 
 	const handleCreateDiscussion = () =>
-		setModal(<CreateDiscussion onClose={() => setModal(null)} defaultParentRoom={room?.prid || room?._id} />);
+		setModal(
+			<CreateDiscussion onClose={() => setModal(null)} defaultParentRoom={room?.prid || room?._id} encryptedParentRoom={room?.encrypted} />,
+		);
 
-	const discussionEnabled = useSetting('Discussion_enabled') as boolean;
+	const discussionEnabled = useSetting('Discussion_enabled', true);
 	const canStartDiscussion = usePermission('start-discussion', room._id);
 	const canSstartDiscussionOtherUser = usePermission('start-discussion-other-user', room._id);
 

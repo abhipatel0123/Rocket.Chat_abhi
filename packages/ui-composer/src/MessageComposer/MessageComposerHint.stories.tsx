@@ -1,14 +1,14 @@
-import type { ComponentMeta, ComponentStory } from '@storybook/react';
+import type { Meta, StoryFn } from '@storybook/react';
 
 import { MessageComposerHint } from '.';
 import '@rocket.chat/icons/dist/rocketchat.css';
 
 export default {
-	title: 'Components/MessageComposer/Hint',
+	title: 'Components/MessageComposerHint',
 	component: MessageComposerHint,
-} as ComponentMeta<typeof MessageComposerHint>;
+} as Meta<typeof MessageComposerHint>;
 
-export const HintWithIconAndHelperText: ComponentStory<typeof MessageComposerHint> = () => {
+export const HintWithIconAndHelperText: StoryFn<typeof MessageComposerHint> = () => {
 	const helperText = (
 		<>
 			<strong>esc</strong> to cancel · <strong>enter</strong> to save
@@ -22,10 +22,10 @@ export const HintWithIconAndHelperText: ComponentStory<typeof MessageComposerHin
 	);
 };
 
-export const HintWithIcon: ComponentStory<typeof MessageComposerHint> = () => (
+export const HintWithIcon: StoryFn<typeof MessageComposerHint> = () => (
 	<MessageComposerHint icon='eye'>This room is read only</MessageComposerHint>
 );
 
-export const HintWithText: ComponentStory<typeof MessageComposerHint> = () => (
+export const HintWithText: StoryFn<typeof MessageComposerHint> = () => (
 	<MessageComposerHint>You're sending an unencrypted message</MessageComposerHint>
 );

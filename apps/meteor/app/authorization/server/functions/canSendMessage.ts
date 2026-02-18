@@ -1,10 +1,10 @@
 import type { IRoom, IUser } from '@rocket.chat/core-typings';
 import { Subscriptions, Rooms } from '@rocket.chat/models';
 
-import { RoomMemberActions } from '../../../../definition/IRoomTypeConfig';
-import { roomCoordinator } from '../../../../server/lib/rooms/roomCoordinator';
 import { canAccessRoomAsync } from './canAccessRoom';
 import { hasPermissionAsync } from './hasPermission';
+import { RoomMemberActions } from '../../../../definition/IRoomTypeConfig';
+import { roomCoordinator } from '../../../../server/lib/rooms/roomCoordinator';
 
 const subscriptionOptions = {
 	projection: {
@@ -20,6 +20,10 @@ export async function validateRoomMessagePermissionsAsync(
 ): Promise<void> {
 	if (!room) {
 		throw new Error('error-invalid-room');
+	}
+
+	if (room.archived) {
+		throw new Error('room_is_archived');
 	}
 
 	if (type !== 'app' && !(await canAccessRoomAsync(room, { _id: uid }, extraData))) {

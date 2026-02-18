@@ -2,14 +2,14 @@ import type { ILivechatBusinessHour, IBusinessHourTimezone } from '@rocket.chat/
 import { LivechatBusinessHourTypes } from '@rocket.chat/core-typings';
 import type { AgendaCronJobs } from '@rocket.chat/cron';
 import { LivechatBusinessHours, LivechatDepartment, Users } from '@rocket.chat/models';
-import moment from 'moment';
+import moment from 'moment-timezone';
 
-import { callbacks } from '../../../../lib/callbacks';
+import type { IBusinessHourBehavior, IBusinessHourType } from './AbstractBusinessHour';
+import { closeBusinessHour } from './closeBusinessHour';
+import { callbacks } from '../../../../server/lib/callbacks';
 import { notifyOnUserChange } from '../../../lib/server/lib/notifyListener';
 import { settings } from '../../../settings/server';
 import { businessHourLogger } from '../lib/logger';
-import type { IBusinessHourBehavior, IBusinessHourType } from './AbstractBusinessHour';
-import { closeBusinessHour } from './closeBusinessHour';
 
 const CRON_EVERY_MIDNIGHT_EXPRESSION = '0 0 * * *';
 const CRON_DAYLIGHT_JOB_NAME = 'livechat-business-hour-daylight-saving-time-verifier';
@@ -223,11 +223,21 @@ export class BusinessHourManager {
 	}
 
 	private async openWorkHoursCallback(day: string, hour: string): Promise<void> {
-		return this.behavior.openBusinessHoursByDayAndHour(day, hour);
+		try {
+			return await this.behavior.openBusinessHoursByDayAndHour(day, hour);
+		} catch (err) {
+			businessHourLogger.error({ msg: 'Error while opening business hours', err });
+			throw err;
+		}
 	}
 
 	private async closeWorkHoursCallback(day: string, hour: string): Promise<void> {
-		return this.behavior.closeBusinessHoursByDayAndHour(day, hour);
+		try {
+			return await this.behavior.closeBusinessHoursByDayAndHour(day, hour);
+		} catch (err) {
+			businessHourLogger.error({ msg: 'Error while closing business hours', err });
+			throw err;
+		}
 	}
 
 	private getBusinessHourType(type: string): IBusinessHourType | undefined {
@@ -287,7 +297,7 @@ export class BusinessHourManager {
 		const failed = result.filter((r) => r.status === 'rejected');
 		if (failed.length > 0) {
 			failed.forEach((error: any) => {
-				businessHourLogger.error('Failed to update business hours with new timezone', error.reason);
+				businessHourLogger.error({ msg: 'Failed to update business hours with new timezone', err: error });
 			});
 		}
 

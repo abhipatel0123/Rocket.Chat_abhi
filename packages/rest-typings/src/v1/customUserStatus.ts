@@ -1,14 +1,10 @@
 import type { ICustomUserStatus, IUserStatus } from '@rocket.chat/core-typings';
-import Ajv from 'ajv';
 
+import { ajv } from './Ajv';
 import type { PaginatedRequest } from '../helpers/PaginatedRequest';
 import type { PaginatedResult } from '../helpers/PaginatedResult';
 
-const ajv = new Ajv({
-	coerceTypes: true,
-});
-
-type CustomUserStatusListProps = PaginatedRequest<{ query: string }>;
+type CustomUserStatusListProps = PaginatedRequest<{ name?: string; _id?: string; query?: string }>;
 
 const CustomUserStatusListSchema = {
 	type: 'object',
@@ -25,11 +21,20 @@ const CustomUserStatusListSchema = {
 			type: 'string',
 			nullable: true,
 		},
+		name: {
+			type: 'string',
+			nullable: true,
+		},
+		_id: {
+			type: 'string',
+			nullable: true,
+		},
 		query: {
 			type: 'string',
+			nullable: true,
 		},
 	},
-	required: ['query'],
+	required: [],
 	additionalProperties: false,
 };
 
@@ -50,7 +55,7 @@ export type CustomUserStatusEndpoints = {
 		POST: (params: { customUserStatusId: string }) => void;
 	};
 	'/v1/custom-user-status.update': {
-		POST: (params: { id: string; name?: string; statusType?: string }) => {
+		POST: (params: { _id: string; name?: string; statusType?: string }) => {
 			customUserStatus: ICustomUserStatus;
 		};
 	};

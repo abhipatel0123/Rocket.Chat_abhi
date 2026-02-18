@@ -1,18 +1,26 @@
-import { Apps } from '@rocket.chat/apps';
-import { api, Message } from '@rocket.chat/core-services';
-import type { IMessage, IRoom } from '@rocket.chat/core-typings';
-import { Messages } from '@rocket.chat/models';
+import { AppEvents, Apps } from '@rocket.chat/apps';
+import { Message } from '@rocket.chat/core-services';
+import { isE2EEMessage } from '@rocket.chat/core-typings';
+import type { IMessage, IRoom, IUpload, IUploadToConfirm } from '@rocket.chat/core-typings';
+import { Messages, Uploads } from '@rocket.chat/models';
 import { Match, check } from 'meteor/check';
 
+import { parseUrlsInMessage } from './parseUrlsInMessage';
 import { isRelativeURL } from '../../../../lib/utils/isRelativeURL';
 import { isURL } from '../../../../lib/utils/isURL';
 import { hasPermissionAsync } from '../../../authorization/server/functions/hasPermission';
 import { FileUpload } from '../../../file-upload/server';
+import { parseMultipleFilesIntoMessageAttachments } from '../../../file-upload/server/methods/sendFileMessage';
 import { settings } from '../../../settings/server';
 import { afterSaveMessage } from '../lib/afterSaveMessage';
-import { notifyOnRoomChangedById, notifyOnMessageChange } from '../lib/notifyListener';
+import { notifyOnRoomChangedById } from '../lib/notifyListener';
 import { validateCustomMessageFields } from '../lib/validateCustomMessageFields';
-import { parseUrlsInMessage } from './parseUrlsInMessage';
+
+type SendMessageOptions = {
+	upsert?: boolean;
+	previewUrls?: string[];
+	filesToConfirm?: IUploadToConfirm[];
+};
 
 // TODO: most of the types here are wrong, but I don't want to change them now
 
@@ -79,8 +87,8 @@ const validateAttachmentsFields = (attachmentField: any) => {
 		}),
 	);
 
-	if (typeof attachmentField.value !== 'undefined') {
-		attachmentField.value = String(attachmentField.value);
+	if (!attachmentField.value || !attachmentField.title) {
+		throw new Error('Invalid attachment field, title and value is required');
 	}
 };
 
@@ -213,20 +221,59 @@ export function prepareMessageObject(
 }
 
 /**
+ * Update file names on the Uploads collection, as the names may have changed between the upload and the sending of the message
+ * For encrypted rooms, the full `content` of the file is updated as well, as the name is included there
+ **/
+const updateFileNames = async (filesToConfirm: IUploadToConfirm[], isE2E: boolean) => {
+	return Promise.all(
+		filesToConfirm.map(async (upload) => {
+			if (isE2E) {
+				// on encrypted files, the `upload.name` is an useless attribute, so it doesn't need to be updated
+				// the name will be loaded from the encrypted data on `upload.content` instead
+				if (upload.content) {
+					await Uploads.updateFileContentById(upload._id, upload.content);
+				}
+			} else if (upload.name) {
+				await Uploads.updateFileNameById(upload._id, upload.name);
+			}
+		}),
+	);
+};
+
+/**
  * Validates and sends the message object.
+ * Validates and sends the message object. This function does not verify the Message_MaxAllowedSize settings.
+ * Caller of the function should verify the Message_MaxAllowedSize if needed.
+ * There might be same use cases which needs to override this setting. Example - sending error logs.
  */
-export const sendMessage = async function (user: any, message: any, room: any, upsert = false, previewUrls?: string[]) {
+export const sendMessage = async function (user: any, message: any, room: any, options: SendMessageOptions = {}) {
+	const { upsert = false, previewUrls, filesToConfirm } = options;
+
 	if (!user || !message || !room._id) {
 		return false;
 	}
 
+	const isE2E = isE2EEMessage(message);
+
+	if (filesToConfirm) {
+		await updateFileNames(filesToConfirm, isE2E);
+	}
+
+	const uploadIdsToConfirm = filesToConfirm?.map(({ _id }) => _id);
+
+	if (uploadIdsToConfirm?.length) {
+		const uploadsToConfirm: Partial<IUpload>[] = await Uploads.findByIds(uploadIdsToConfirm).toArray();
+		const { files, attachments } = await parseMultipleFilesIntoMessageAttachments(uploadsToConfirm, message.rid, user);
+		message.files = files;
+		message.attachments = attachments;
+		// For compatibility with older integrations, we save the first file to the `file` attribute of the message
+		if (files.length) {
+			message.file = files[0];
+		}
+	}
+
 	await validateMessage(message, room, user);
 	prepareMessageObject(message, room._id, user);
-
-	if (message.t === 'otr') {
-		void api.broadcast('otrMessage', { roomId: message.rid, message, user, room });
-		return message;
-	}
 
 	if (settings.get('Message_Read_Receipt_Enabled')) {
 		message.unread = true;
@@ -234,16 +281,15 @@ export const sendMessage = async function (user: any, message: any, room: any, u
 
 	// For the Rocket.Chat Apps :)
 	if (Apps.self?.isLoaded()) {
-		const listenerBridge = Apps.getBridges()?.getListenerBridge();
+		const prevent = await Apps.self?.triggerEvent(AppEvents.IPreMessageSentPrevent, message);
 
-		const prevent = await listenerBridge?.messageEvent('IPreMessageSentPrevent', message);
 		if (prevent) {
 			return;
 		}
 
-		const result = await listenerBridge?.messageEvent(
-			'IPreMessageSentModify',
-			await listenerBridge?.messageEvent('IPreMessageSentExtend', message),
+		const result = await Apps.self?.triggerEvent(
+			AppEvents.IPreMessageSentModify,
+			await Apps.self?.triggerEvent(AppEvents.IPreMessageSentExtend, message),
 		);
 
 		if (typeof result === 'object') {
@@ -284,15 +330,16 @@ export const sendMessage = async function (user: any, message: any, room: any, u
 	}
 
 	if (Apps.self?.isLoaded()) {
-		// This returns a promise, but it won't mutate anything about the message
-		// so, we don't really care if it is successful or fails
-		void Apps.getBridges()?.getListenerBridge().messageEvent('IPostMessageSent', message);
+		// If the message has a type (system message), we should notify the listener about it
+		const messageEvent = message.t ? AppEvents.IPostSystemMessageSent : AppEvents.IPostMessageSent;
+		void Apps.self?.triggerEvent(messageEvent, message);
 	}
 
-	// TODO: is there an opportunity to send returned data to notifyOnMessageChange?
-	await afterSaveMessage(message, room);
+	await afterSaveMessage(message, room, user);
 
-	void notifyOnMessageChange({ id: message._id });
+	if (uploadIdsToConfirm?.length) {
+		await Uploads.confirmTemporaryFiles(uploadIdsToConfirm, user._id);
+	}
 
 	void notifyOnRoomChangedById(message.rid);
 
